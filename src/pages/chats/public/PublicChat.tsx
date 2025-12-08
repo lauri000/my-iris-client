@@ -94,10 +94,13 @@ const PublicChat = () => {
     if (!/^[0-9a-f]{64}$/i.test(id)) return
 
     // Set up subscription for channel messages
-    const sub = ndk().subscribe({
-      kinds: [KIND_CHANNEL_MESSAGE],
-      "#e": [id],
-    })
+    const sub = ndk().subscribe(
+      {
+        kinds: [KIND_CHANNEL_MESSAGE],
+        "#e": [id],
+      },
+      {closeOnEose: true}
+    )
 
     // Handle new messages
     sub.on("event", (event) => {

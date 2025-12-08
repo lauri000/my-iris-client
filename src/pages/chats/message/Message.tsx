@@ -101,7 +101,7 @@ const Message = ({
       "#e": [message.id],
     }
 
-    const sub = ndk().subscribe(filter)
+    const sub = ndk().subscribe(filter, {closeOnEose: true})
 
     sub.on("event", (reactionEvent) => {
       if (!reactionEvent || !reactionEvent.id) return

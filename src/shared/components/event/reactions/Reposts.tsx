@@ -17,7 +17,7 @@ export default function Reposts({event}: {event: NDKEvent}) {
         kinds: [KIND_REPOST],
         ["#e"]: [event.id],
       }
-      const sub = ndk().subscribe(filter)
+      const sub = ndk().subscribe(filter, {closeOnEose: true})
 
       sub?.on("event", (event: NDKEvent) => {
         if (shouldHideUser(event.author.pubkey)) return

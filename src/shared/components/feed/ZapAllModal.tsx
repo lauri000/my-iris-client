@@ -109,7 +109,7 @@ function ZapAllModal({events, onClose}: ZapAllModalProps) {
       }
 
       try {
-        const sub = ndk().subscribe(filter)
+        const sub = ndk().subscribe(filter, {closeOnEose: true})
         let found = false
 
         sub?.on("event", (zapEvent: NDKEvent) => {

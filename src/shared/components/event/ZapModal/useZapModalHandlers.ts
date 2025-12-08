@@ -252,7 +252,7 @@ export function useZapModalHandlers(params: UseZapModalHandlersParams) {
       ["#e"]: [params.event.id],
     }
     try {
-      const sub = ndk().subscribe(filter)
+      const sub = ndk().subscribe(filter, {closeOnEose: true})
 
       sub?.on("event", async (zapEvent: NDKEvent) => {
         sub.stop()

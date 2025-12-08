@@ -20,7 +20,7 @@ export default function Zaps({event}: {event: NDKEvent}) {
         kinds: [KIND_ZAP_RECEIPT],
         ["#e"]: [event.id],
       }
-      const sub = ndk().subscribe(filter)
+      const sub = ndk().subscribe(filter, {closeOnEose: true})
       const allZaps: ZapInfo[] = []
 
       sub?.on("event", async (zapEvent: NDKEvent) => {

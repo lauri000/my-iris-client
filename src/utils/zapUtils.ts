@@ -50,7 +50,7 @@ export const fetchZappedAmount = async (event: NDKEvent): Promise<number> => {
       ["#e"]: [event.id],
     }
     try {
-      const sub = ndk().subscribe(filter)
+      const sub = ndk().subscribe(filter, {closeOnEose: true})
 
       sub?.on("event", async (event) => {
         const invoice = event.tagValue("bolt11")

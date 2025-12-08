@@ -22,7 +22,7 @@ export default function ZapsBar({event}: ZapsBarProps) {
       ["#e"]: [event.id],
     }
 
-    const sub = ndk().subscribe(filter)
+    const sub = ndk().subscribe(filter, {closeOnEose: true})
     const processedEvents = new Set<string>()
 
     sub?.on("event", (zapEvent: NDKEvent) => {
