@@ -7,6 +7,7 @@ import NDK, {
   NDKUser,
 } from "@/lib/ndk"
 import type {NDKFilter} from "@/lib/ndk"
+import {filterFingerprint} from "@/lib/ndk/subscription/grouping"
 import {NDKWorkerTransport} from "@/lib/ndk-transport-worker"
 import {NDKTauriTransport} from "@/lib/ndk-transport-tauri"
 import {useUserStore} from "@/stores/user"
@@ -41,6 +42,7 @@ type NdkSubscriptionDebugSnapshot = {
   persistentTotal: number
   subscriptions: NdkSubscriptionDebugInfo[]
   persistent: NdkSubscriptionDebugInfo[]
+  summaryStatistics: Record<string, number>
 }
 
 declare global {
@@ -265,7 +267,13 @@ function setupNdkSubscriptionInspector() {
 
 function getNdkSubscriptionSnapshot(): NdkSubscriptionDebugSnapshot {
   if (!ndkInstance) {
-    return {total: 0, persistentTotal: 0, subscriptions: [], persistent: []}
+    return {
+      total: 0,
+      persistentTotal: 0,
+      subscriptions: [],
+      persistent: [],
+      summaryStatistics: {},
+    }
   }
 
   const subscriptions: NdkSubscriptionDebugInfo[] = Array.from(
@@ -281,11 +289,18 @@ function getNdkSubscriptionSnapshot(): NdkSubscriptionDebugSnapshot {
 
   const persistent = subscriptions.filter((info) => !info.closeOnEose)
 
+  const summaryStatistics = subscriptions.reduce<Record<string, number>>((acc, info) => {
+    const fingerprint = filterFingerprint(info.filters, info.closeOnEose) || "unknown"
+    acc[fingerprint] = (acc[fingerprint] ?? 0) + 1
+    return acc
+  }, {})
+
   return {
     total: subscriptions.length,
     persistentTotal: persistent.length,
     subscriptions,
     persistent,
+    summaryStatistics,
   }
 }
 
