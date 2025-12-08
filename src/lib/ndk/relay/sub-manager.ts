@@ -31,7 +31,7 @@ export class NDKRelaySubscriptionManager {
 
   /**
    * Adds a subscription to the manager.
-   */
+  */
   public addSubscription(sub: NDKSubscription, filters: NDKFilter[]) {
     let relaySub: NDKRelaySubscription | undefined
 

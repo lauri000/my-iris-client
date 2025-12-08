@@ -6,6 +6,7 @@ import NDK, {
   NDKRelayAuthPolicies,
   NDKUser,
 } from "@/lib/ndk"
+import type {NDKFilter} from "@/lib/ndk"
 import {NDKWorkerTransport} from "@/lib/ndk-transport-worker"
 import {NDKTauriTransport} from "@/lib/ndk-transport-tauri"
 import {useUserStore} from "@/stores/user"
@@ -25,6 +26,30 @@ let nip07Signer: NDKNip07Signer | undefined
 let initPromise: Promise<void> | null = null
 let workerTransport: NDKWorkerTransport | undefined
 let tauriTransport: NDKTauriTransport | undefined
+
+type NdkSubscriptionDebugInfo = {
+  internalId: string
+  subId?: string
+  closeOnEose: boolean
+  groupable: boolean
+  filters: NDKFilter[]
+  relayUrls?: string[]
+}
+
+type NdkSubscriptionDebugSnapshot = {
+  total: number
+  persistentTotal: number
+  subscriptions: NdkSubscriptionDebugInfo[]
+  persistent: NdkSubscriptionDebugInfo[]
+}
+
+declare global {
+  interface Window {
+    irisDebugNdkSubscriptions?: () => NdkSubscriptionDebugSnapshot
+  }
+}
+
+setupNdkSubscriptionInspector()
 
 function normalizeRelayUrl(url: string): string {
   // Ensure URL ends with / to match NDK's internal normalization
@@ -230,6 +255,38 @@ function setupWebRTCTransport(instance: NDK) {
   instance.transportPlugins.push(plugin)
 
   log("WebRTC transport plugin initialized")
+}
+
+function setupNdkSubscriptionInspector() {
+  if (typeof window === "undefined") return
+
+  window.irisDebugNdkSubscriptions = () => getNdkSubscriptionSnapshot()
+}
+
+function getNdkSubscriptionSnapshot(): NdkSubscriptionDebugSnapshot {
+  if (!ndkInstance) {
+    return {total: 0, persistentTotal: 0, subscriptions: [], persistent: []}
+  }
+
+  const subscriptions: NdkSubscriptionDebugInfo[] = Array.from(
+    ndkInstance.subManager.subscriptions.values()
+  ).map((sub) => ({
+    internalId: sub.internalId,
+    subId: sub.subId,
+    closeOnEose: sub.closeOnEose,
+    groupable: sub.isGroupable(),
+    filters: sub.filters,
+    relayUrls: sub.relaySet?.relayUrls,
+  }))
+
+  const persistent = subscriptions.filter((info) => !info.closeOnEose)
+
+  return {
+    total: subscriptions.length,
+    persistentTotal: persistent.length,
+    subscriptions,
+    persistent,
+  }
 }
 
 function watchLocalSettings(instance: NDK) {
