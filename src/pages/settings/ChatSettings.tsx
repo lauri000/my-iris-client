@@ -1,15 +1,10 @@
-import {useState, useEffect, lazy, Suspense} from "react"
+import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
-import {RiDeleteBin6Line, RiEdit2Line, RiQrCodeLine, RiAddLine} from "@remixicon/react"
+import {RiDeleteBin6Line, RiEdit2Line} from "@remixicon/react"
 import {SettingsGroup} from "@/shared/components/settings/SettingsGroup"
 import {SettingsGroupItem} from "@/shared/components/settings/SettingsGroupItem"
 import {getSessionManager} from "@/shared/services/PrivateChats"
 import {confirm, alert} from "@/utils/utils"
-import CopyButton from "@/shared/components/button/CopyButton"
-import {encodeDevicePayload, decodeDevicePayload} from "nostr-double-ratchet"
-import {LoadingFallback} from "@/shared/components/LoadingFallback"
-
-const QRScanner = lazy(() => import("@/shared/components/QRScanner"))
 
 interface DeviceInfo {
   id: string
@@ -19,18 +14,11 @@ interface DeviceInfo {
   staleAt?: number
 }
 
-type ViewMode = "list" | "link" | "add" | "scan"
-
 const ChatSettings = () => {
   const {publicKey} = useUserStore()
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [showStale, setShowStale] = useState(false)
-  const [viewMode, setViewMode] = useState<ViewMode>("list")
-  const [linkCode, setLinkCode] = useState<string>("")
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>("")
-  const [addDeviceCode, setAddDeviceCode] = useState("")
-  const [addDeviceError, setAddDeviceError] = useState<string | null>(null)
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState("")
 
@@ -131,101 +119,7 @@ const ChatSettings = () => {
     (device) => device.staleAt !== undefined && !device.isCurrent
   )
 
-  // Generate link code for this device (Increment 5)
-  const generateLinkCode = async () => {
-    const manager = getSessionManager()
-    if (!manager) return
-
-    const ownDevice = manager.getOwnDevice()
-    if (!ownDevice) return
-
-    const payload = {
-      ephemeralPubkey: ownDevice.ephemeralPublicKey,
-      sharedSecret: ownDevice.sharedSecret,
-      deviceId: ownDevice.deviceId,
-      deviceLabel: ownDevice.deviceLabel,
-    }
-
-    const encoded = encodeDevicePayload(payload)
-    setLinkCode(encoded)
-
-    // Generate QR code
-    try {
-      const QRCode = await import("qrcode")
-      const url = await new Promise<string>((resolve, reject) => {
-        QRCode.toDataURL(encoded, (error, url) => {
-          if (error) reject(error)
-          else resolve(url)
-        })
-      })
-      setQrCodeUrl(url)
-    } catch (err) {
-      console.error("Error generating QR code:", err)
-    }
-
-    setViewMode("link")
-  }
-
-  // Add device from code (Increment 6)
-  const handleAddDevice = async () => {
-    setAddDeviceError(null)
-
-    const code = addDeviceCode.trim()
-    if (!code) {
-      setAddDeviceError("Please enter a device code")
-      return
-    }
-
-    const payload = decodeDevicePayload(code)
-    if (!payload) {
-      setAddDeviceError("Invalid device code")
-      return
-    }
-
-    try {
-      setLoading(true)
-      const manager = getSessionManager()
-      if (!manager) throw new Error("SessionManager not available")
-
-      await manager.addDevice(payload)
-      await refreshDeviceList(manager)
-      setAddDeviceCode("")
-      setViewMode("list")
-    } catch (error) {
-      console.error("Failed to add device:", error)
-      setAddDeviceError("Failed to add device")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Handle QR scan success (Increment 7)
-  const handleScanSuccess = async (scannedData: string) => {
-    const payload = decodeDevicePayload(scannedData)
-    if (!payload) {
-      await alert("Invalid device code in QR")
-      setViewMode("list")
-      return
-    }
-
-    try {
-      setLoading(true)
-      const manager = getSessionManager()
-      if (!manager) throw new Error("SessionManager not available")
-
-      await manager.addDevice(payload)
-      await refreshDeviceList(manager)
-      setViewMode("list")
-    } catch (error) {
-      console.error("Failed to add device:", error)
-      await alert("Failed to add device")
-      setViewMode("list")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Edit device label (Increment 8)
+  // Edit device label
   const handleStartEdit = (device: DeviceInfo) => {
     setEditingDeviceId(device.id)
     setEditingLabel(device.label || device.id)
@@ -396,214 +290,6 @@ const ChatSettings = () => {
     )
   }
 
-  // Link Device View (Increment 5)
-  const renderLinkView = () => (
-    <div className="space-y-6">
-      <SettingsGroup title="Link This Device">
-        <SettingsGroupItem isLast>
-          <div className="flex flex-col items-center gap-4 py-4">
-            <p className="text-sm text-base-content/70 text-center">
-              Scan this QR code or enter the code on your main device to link this device.
-            </p>
-            {qrCodeUrl && (
-              <div className="aspect-square w-48">
-                <img
-                  src={qrCodeUrl}
-                  alt="Device Link QR Code"
-                  className="w-full h-full rounded-2xl"
-                />
-              </div>
-            )}
-            {linkCode && (
-              <div className="w-full">
-                <p className="text-xs text-base-content/50 mb-2 text-center">
-                  Or copy this code:
-                </p>
-                <div className="bg-base-200 rounded-lg p-3">
-                  <p className="text-xs font-mono break-all select-all text-center">
-                    {linkCode}
-                  </p>
-                </div>
-                <div className="flex justify-center mt-3">
-                  <CopyButton
-                    className="btn btn-sm btn-neutral"
-                    copyStr={linkCode}
-                    text="Copy code"
-                  />
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => setViewMode("list")}
-              className="btn btn-ghost btn-sm mt-4"
-            >
-              Back
-            </button>
-          </div>
-        </SettingsGroupItem>
-      </SettingsGroup>
-    </div>
-  )
-
-  // Add Device View (Increment 6)
-  const renderAddView = () => (
-    <div className="space-y-6">
-      <SettingsGroup title="Add Device">
-        <SettingsGroupItem isLast>
-          <div className="flex flex-col gap-4 py-4">
-            <p className="text-sm text-base-content/70">
-              Enter the device code from the device you want to add:
-            </p>
-            <input
-              type="text"
-              value={addDeviceCode}
-              onChange={(e) => {
-                setAddDeviceCode(e.target.value)
-                setAddDeviceError(null)
-              }}
-              placeholder="Paste device code here"
-              className="input input-bordered w-full font-mono text-sm"
-            />
-            {addDeviceError && <p className="text-sm text-error">{addDeviceError}</p>}
-            <div className="flex gap-2">
-              <button
-                onClick={handleAddDevice}
-                className="btn btn-primary flex-1"
-                disabled={loading}
-              >
-                {loading ? "Adding..." : "Add Device"}
-              </button>
-              <button onClick={() => setViewMode("scan")} className="btn btn-neutral">
-                <RiQrCodeLine size={20} />
-                Scan QR
-              </button>
-            </div>
-            <button
-              onClick={() => {
-                setAddDeviceCode("")
-                setAddDeviceError(null)
-                setViewMode("list")
-              }}
-              className="btn btn-ghost btn-sm"
-            >
-              Cancel
-            </button>
-          </div>
-        </SettingsGroupItem>
-      </SettingsGroup>
-    </div>
-  )
-
-  // Scan QR View (Increment 7)
-  const renderScanView = () => (
-    <div className="space-y-6">
-      <SettingsGroup title="Scan Device QR">
-        <SettingsGroupItem isLast>
-          <div className="flex flex-col items-center gap-4 py-4">
-            <Suspense fallback={<LoadingFallback />}>
-              <QRScanner onScanSuccess={handleScanSuccess} />
-            </Suspense>
-            <button
-              onClick={() => setViewMode("add")}
-              className="btn btn-ghost btn-sm mt-4"
-            >
-              Back to text input
-            </button>
-          </div>
-        </SettingsGroupItem>
-      </SettingsGroup>
-    </div>
-  )
-
-  // Main list view
-  const renderListView = () => (
-    <>
-      <div className="mb-6">
-        <p className="text-base-content/70">
-          Your devices / apps for private messaging. Each device / app has a unique invite
-          that allows other users to establish secure sessions.
-        </p>
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex gap-3 mb-6">
-        <button
-          onClick={generateLinkCode}
-          className="btn btn-neutral btn-sm flex items-center gap-2"
-        >
-          <RiQrCodeLine size={18} />
-          Link This Device
-        </button>
-        <button
-          onClick={() => setViewMode("add")}
-          className="btn btn-primary btn-sm flex items-center gap-2"
-        >
-          <RiAddLine size={18} />
-          Add Device
-        </button>
-      </div>
-
-      {currentDevice && (
-        <div className="mb-6">
-          <SettingsGroup title="This Device">
-            {renderDeviceItem(currentDevice, true)}
-          </SettingsGroup>
-        </div>
-      )}
-
-      <div className="space-y-6">
-        <SettingsGroup title="Your Devices / Apps">
-          {loading && (
-            <SettingsGroupItem isLast>
-              <div className="text-center py-4">
-                <p className="text-base-content/70">Loading devices / apps...</p>
-              </div>
-            </SettingsGroupItem>
-          )}
-          {!loading && otherActiveDevices.length === 0 && staleDevices.length === 0 && (
-            <SettingsGroupItem isLast>
-              <div className="text-center py-4">
-                <p className="text-base-content/70">No other devices / apps found.</p>
-              </div>
-            </SettingsGroupItem>
-          )}
-          {!loading && (otherActiveDevices.length > 0 || staleDevices.length > 0) && (
-            <>
-              {otherActiveDevices.map((device, index) => {
-                const isLastActive =
-                  index === otherActiveDevices.length - 1 && staleDevices.length === 0
-                return renderDeviceItem(device, isLastActive)
-              })}
-              {staleDevices.length > 0 && (
-                <SettingsGroupItem key="stale-section" isLast>
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowStale((prev) => !prev)}
-                      className="flex w-full items-center justify-between rounded-lg border border-base-300 bg-base-100 px-4 py-2 text-sm font-medium text-base-content/60 hover:bg-base-200"
-                    >
-                      <span>
-                        {showStale ? "▼" : "▶"} Stale devices ({staleDevices.length})
-                      </span>
-                      <span className="text-xs text-base-content/50">
-                        Revoked invites, kept for reference
-                      </span>
-                    </button>
-                    {showStale && (
-                      <div className="rounded-lg border border-base-300 bg-base-100 divide-y divide-base-300">
-                        {staleDevices.map((device) => renderStaleDeviceRow(device))}
-                      </div>
-                    )}
-                  </div>
-                </SettingsGroupItem>
-              )}
-            </>
-          )}
-        </SettingsGroup>
-      </div>
-    </>
-  )
-
   if (!publicKey) {
     return (
       <div className="bg-base-200 min-h-full">
@@ -619,10 +305,71 @@ const ChatSettings = () => {
   return (
     <div className="bg-base-200 min-h-full">
       <div className="p-4">
-        {viewMode === "list" && renderListView()}
-        {viewMode === "link" && renderLinkView()}
-        {viewMode === "add" && renderAddView()}
-        {viewMode === "scan" && renderScanView()}
+        <div className="mb-6">
+          <p className="text-base-content/70">
+            Your devices / apps for private messaging. Each device / app has a unique
+            invite that allows other users to establish secure sessions.
+          </p>
+        </div>
+
+        {currentDevice && (
+          <div className="mb-6">
+            <SettingsGroup title="This Device">
+              {renderDeviceItem(currentDevice, true)}
+            </SettingsGroup>
+          </div>
+        )}
+
+        <div className="space-y-6">
+          <SettingsGroup title="Your Devices / Apps">
+            {loading && (
+              <SettingsGroupItem isLast>
+                <div className="text-center py-4">
+                  <p className="text-base-content/70">Loading devices / apps...</p>
+                </div>
+              </SettingsGroupItem>
+            )}
+            {!loading && otherActiveDevices.length === 0 && staleDevices.length === 0 && (
+              <SettingsGroupItem isLast>
+                <div className="text-center py-4">
+                  <p className="text-base-content/70">No other devices / apps found.</p>
+                </div>
+              </SettingsGroupItem>
+            )}
+            {!loading && (otherActiveDevices.length > 0 || staleDevices.length > 0) && (
+              <>
+                {otherActiveDevices.map((device, index) => {
+                  const isLastActive =
+                    index === otherActiveDevices.length - 1 && staleDevices.length === 0
+                  return renderDeviceItem(device, isLastActive)
+                })}
+                {staleDevices.length > 0 && (
+                  <SettingsGroupItem key="stale-section" isLast>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowStale((prev) => !prev)}
+                        className="flex w-full items-center justify-between rounded-lg border border-base-300 bg-base-100 px-4 py-2 text-sm font-medium text-base-content/60 hover:bg-base-200"
+                      >
+                        <span>
+                          {showStale ? "▼" : "▶"} Stale devices ({staleDevices.length})
+                        </span>
+                        <span className="text-xs text-base-content/50">
+                          Revoked invites, kept for reference
+                        </span>
+                      </button>
+                      {showStale && (
+                        <div className="rounded-lg border border-base-300 bg-base-100 divide-y divide-base-300">
+                          {staleDevices.map((device) => renderStaleDeviceRow(device))}
+                        </div>
+                      )}
+                    </div>
+                  </SettingsGroupItem>
+                )}
+              </>
+            )}
+          </SettingsGroup>
+        </div>
       </div>
     </div>
   )
