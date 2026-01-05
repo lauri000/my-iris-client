@@ -176,26 +176,38 @@ const ChatSettings = () => {
 
     return (
       <SettingsGroupItem key={device.id} isLast={isLast}>
-        <div className="flex items-start justify-between">
+        <div
+          className="flex items-start justify-between"
+          data-testid={`device-item-${device.id}`}
+        >
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               {isEditing ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" data-testid="device-edit-form">
                   <input
                     type="text"
                     value={editingLabel}
                     onChange={(e) => setEditingLabel(e.target.value)}
                     className="input input-sm input-bordered"
                     autoFocus
+                    data-testid="device-label-input"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleSaveLabel()
                       if (e.key === "Escape") handleCancelEdit()
                     }}
                   />
-                  <button onClick={handleSaveLabel} className="btn btn-sm btn-primary">
+                  <button
+                    onClick={handleSaveLabel}
+                    className="btn btn-sm btn-primary"
+                    data-testid="device-label-save"
+                  >
                     Save
                   </button>
-                  <button onClick={handleCancelEdit} className="btn btn-sm btn-ghost">
+                  <button
+                    onClick={handleCancelEdit}
+                    className="btn btn-sm btn-ghost"
+                    data-testid="device-label-cancel"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -203,18 +215,40 @@ const ChatSettings = () => {
                 <>
                   {device.label ? (
                     <>
-                      <span className="font-medium">{device.label}</span>
-                      <span className="font-mono text-xs text-base-content/50">
+                      <span className="font-medium" data-testid="device-label">
+                        {device.label}
+                      </span>
+                      <span
+                        className="font-mono text-xs text-base-content/50"
+                        data-testid="device-id"
+                      >
                         {device.id}
                       </span>
                     </>
                   ) : (
-                    <span className="font-medium font-mono text-sm">{device.id}</span>
+                    <span
+                      className="font-medium font-mono text-sm"
+                      data-testid="device-id"
+                    >
+                      {device.id}
+                    </span>
                   )}
                   {device.isCurrent && (
-                    <span className="badge badge-primary badge-sm">Current</span>
+                    <span
+                      className="badge badge-primary badge-sm"
+                      data-testid="current-device-badge"
+                    >
+                      Current
+                    </span>
                   )}
-                  {isStale && <span className="badge badge-warning badge-sm">Stale</span>}
+                  {isStale && (
+                    <span
+                      className="badge badge-warning badge-sm"
+                      data-testid="stale-device-badge"
+                    >
+                      Stale
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -242,6 +276,7 @@ const ChatSettings = () => {
                 onClick={() => handleStartEdit(device)}
                 className="btn btn-ghost btn-sm text-base-content/70 hover:bg-base-300"
                 title="Edit device label"
+                data-testid="device-edit-button"
               >
                 <RiEdit2Line size={16} />
               </button>
@@ -250,6 +285,7 @@ const ChatSettings = () => {
                   onClick={() => handleDeleteDevice(device.id)}
                   className="btn btn-ghost btn-sm text-error hover:bg-error/20"
                   title="Delete device / app invite"
+                  data-testid="device-delete-button"
                 >
                   <RiDeleteBin6Line size={16} />
                 </button>
@@ -292,7 +328,7 @@ const ChatSettings = () => {
 
   if (!publicKey) {
     return (
-      <div className="bg-base-200 min-h-full">
+      <div className="bg-base-200 min-h-full" data-testid="chat-settings-signed-out">
         <div className="p-4">
           <div className="text-center py-8 text-base-content/70">
             Please sign in to manage your chat settings.
@@ -303,7 +339,7 @@ const ChatSettings = () => {
   }
 
   return (
-    <div className="bg-base-200 min-h-full">
+    <div className="bg-base-200 min-h-full" data-testid="chat-settings">
       <div className="p-4">
         <div className="mb-6">
           <p className="text-base-content/70">
@@ -313,7 +349,7 @@ const ChatSettings = () => {
         </div>
 
         {currentDevice && (
-          <div className="mb-6">
+          <div className="mb-6" data-testid="this-device-section">
             <SettingsGroup title="This Device">
               {renderDeviceItem(currentDevice, true)}
             </SettingsGroup>
