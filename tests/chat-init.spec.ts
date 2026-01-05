@@ -23,7 +23,9 @@ test.describe("Chat Initialization", () => {
     }
 
     // Verify the init screen content
-    await expect(page.getByRole("heading", {name: "Enable Private Messaging"})).toBeVisible()
+    await expect(
+      page.getByRole("heading", {name: "Enable Private Messaging"})
+    ).toBeVisible()
   })
 
   test("clicking Enable initializes chat and shows chat UI", async ({page}) => {
@@ -69,28 +71,24 @@ test.describe("Chat Initialization", () => {
     await expect(initButton).not.toBeVisible()
   })
 
-  test("Continue button appears when local data exists", async ({page}) => {
-    await signUp(page)
-
-    // First, initialize chat
+  test("different users have separate init states", async ({page}) => {
+    // First user enables chat
+    const user1 = await signUp(page, "User One")
     await page.goto("/chats")
     const initButton = page.getByTestId("chat-init-enable")
     await expect(initButton).toBeVisible({timeout: 10000})
     await initButton.click()
     await expect(page.getByText("Direct")).toBeVisible({timeout: 10000})
 
-    // Clear the initialized flag but keep local data
-    await page.evaluate(() => {
-      localStorage.removeItem("chat-initialized")
-    })
+    // Get user1's public key to verify the flag is user-specific
+    const user1Key = user1.publicKey
 
-    // Reload
-    await page.reload()
-
-    // Should show "Continue" button since local data exists
-    const continueButton = page.getByTestId("chat-init-continue")
-    await expect(continueButton).toBeVisible({timeout: 10000})
-    await expect(page.getByText("Private Messaging Ready")).toBeVisible()
+    // Verify flag is set with user's pubkey
+    const flagKey = await page.evaluate(
+      (pubkey) => localStorage.getItem(`chat-initialized:${pubkey}`),
+      user1Key
+    )
+    expect(flagKey).toBe("true")
   })
 
   test("settings/chat page is always accessible", async ({page}) => {

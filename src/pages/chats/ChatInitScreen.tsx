@@ -64,36 +64,6 @@ const ChatInitScreen = ({state, onComplete}: ChatInitScreenProps) => {
       )
     }
 
-    if (state.status === "has_local") {
-      return (
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center">
-            <RiChat1Line className="w-8 h-8 text-success" />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold mb-2">Private Messaging Ready</h2>
-            <p className="text-base-content/70 max-w-md">
-              This device is already set up for private messaging. Click continue to start
-              chatting.
-            </p>
-          </div>
-          <button
-            onClick={handleInitialize}
-            disabled={isInitializing}
-            className="btn btn-primary btn-lg gap-2"
-            data-testid="chat-init-continue"
-          >
-            {isInitializing ? (
-              <span className="loading loading-spinner loading-sm" />
-            ) : (
-              <RiChat1Line className="w-5 h-5" />
-            )}
-            Continue
-          </button>
-        </div>
-      )
-    }
-
     if (state.status === "needs_link") {
       return (
         <div className="flex flex-col items-center gap-6 text-center">

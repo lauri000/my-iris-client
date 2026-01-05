@@ -1,6 +1,5 @@
 import {useState, useEffect, useCallback} from "react"
 import {useUserStore} from "@/stores/user"
-import {hasLocalChatData} from "@/shared/services/PrivateChats"
 import {ndk} from "@/utils/ndk"
 import {KIND_APP_DATA, KIND_INVITE_LIST, DEBUG_NAMESPACES} from "@/utils/constants"
 import {createDebugLogger} from "@/utils/createDebugLogger"
@@ -13,7 +12,6 @@ const EOSE_TIMEOUT_MS = 5000
 export type ChatInitState =
   | {status: "loading"}
   | {status: "offline"}
-  | {status: "has_local"}
   | {status: "checking_remote"}
   | {status: "needs_new"}
   | {status: "needs_link"; remoteDevices: number}
@@ -24,9 +22,11 @@ export type ChatInitState =
  *
  * Flow:
  * 1. Check if already initialized (localStorage flag) → ready
- * 2. Check if local data exists → has_local
- * 3. If offline and no local data → offline
- * 4. Check Nostr for existing InviteList → needs_link or needs_new
+ * 2. If offline → offline (can't check for existing devices)
+ * 3. Check Nostr for existing InviteList → needs_link or needs_new
+ *
+ * Note: We intentionally don't check local storage data - only the explicit
+ * flag matters. This ensures users must consciously enable private messaging.
  */
 export const useChatInitState = (): {
   state: ChatInitState
@@ -35,10 +35,15 @@ export const useChatInitState = (): {
   const [state, setState] = useState<ChatInitState>({status: "loading"})
   const publicKey = useUserStore((s) => s.publicKey)
 
+  // User-specific flag key
+  const flagKey = publicKey
+    ? `${CHAT_INITIALIZED_KEY}:${publicKey}`
+    : CHAT_INITIALIZED_KEY
+
   const setReady = useCallback(() => {
-    localStorage.setItem(CHAT_INITIALIZED_KEY, "true")
+    localStorage.setItem(flagKey, "true")
     setState({status: "ready"})
-  }, [])
+  }, [flagKey])
 
   useEffect(() => {
     if (!publicKey) {
@@ -54,30 +59,22 @@ export const useChatInitState = (): {
       : never
 
     const checkState = async () => {
-      // 1. Check if already initialized
-      const isInitialized = localStorage.getItem(CHAT_INITIALIZED_KEY) === "true"
+      // 1. Check if already initialized (user-specific flag)
+      const isInitialized = localStorage.getItem(flagKey) === "true"
       if (isInitialized) {
         log("Chat already initialized (flag set)")
         if (!cancelled) setState({status: "ready"})
         return
       }
 
-      // 2. Check for local data
-      const hasLocal = await hasLocalChatData()
-      if (hasLocal) {
-        log("Found local chat data")
-        if (!cancelled) setState({status: "has_local"})
-        return
-      }
-
-      // 3. Check if offline
+      // 2. Check if offline - can't verify existing devices
       if (!navigator.onLine) {
-        log("Offline with no local data")
+        log("Offline - cannot check for existing devices")
         if (!cancelled) setState({status: "offline"})
         return
       }
 
-      // 4. Check Nostr for existing InviteList
+      // 3. Check Nostr for existing InviteList
       log("Checking Nostr for existing devices...")
       if (!cancelled) setState({status: "checking_remote"})
 
@@ -144,7 +141,7 @@ export const useChatInitState = (): {
       subscription?.stop()
       window.removeEventListener("online", handleOnline)
     }
-  }, [publicKey])
+  }, [publicKey, flagKey])
 
   return {state, setReady}
 }
