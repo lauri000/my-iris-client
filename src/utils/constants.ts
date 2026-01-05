@@ -33,6 +33,9 @@ export const KIND_FLAG_LIST = 16463 // Flagged/reported users list
 // NIP-78: App-specific data
 export const KIND_APP_DATA = 30078
 
+// Double-ratchet InviteList (consolidated device list)
+export const KIND_INVITE_LIST = 10078
+
 // Long-form content
 export const KIND_LONG_FORM_CONTENT = 30023
 

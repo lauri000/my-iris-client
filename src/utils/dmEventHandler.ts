@@ -12,9 +12,32 @@ import {DEBUG_NAMESPACES} from "@/utils/constants"
 const {log, error} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
 let unsubscribeSessionEvents: (() => void) | null = null
+let isInitialized = false
 
 export const cleanupSessionEventListener = () => {
   unsubscribeSessionEvents?.()
+  isInitialized = false
+}
+
+/**
+ * Initialize chat and attach session event listener.
+ * Called manually when user clicks "Enable Private Messaging" or similar.
+ */
+export const initializeChat = async (): Promise<void> => {
+  if (isInitialized) {
+    log("Chat already initialized, skipping")
+    return
+  }
+
+  const sessionManager = getSessionManager()
+  if (!sessionManager) {
+    throw new Error("Session manager not available")
+  }
+
+  await sessionManager.init()
+  attachSessionEventListener()
+  isInitialized = true
+  log("Chat initialized successfully")
 }
 
 export const attachSessionEventListener = () => {
