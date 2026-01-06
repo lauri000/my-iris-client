@@ -129,13 +129,3 @@ export const deleteCurrentDeviceInvite = async () => {
   const deviceId = manager.getDeviceId()
   await deleteDeviceInvite(deviceId)
 }
-
-/**
- * Checks if local chat data exists (InviteList in storage)
- * Used to determine if chat needs initialization
- */
-export const hasLocalChatData = async (): Promise<boolean> => {
-  const storage = new LocalForageStorageAdapter()
-  const data = await storage.get<string>("v2/invite-list")
-  return data !== undefined
-}

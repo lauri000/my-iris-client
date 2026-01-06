@@ -1,6 +1,6 @@
 import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
-import {RiDeleteBin6Line, RiEdit2Line} from "@remixicon/react"
+import {RiDeleteBin6Line} from "@remixicon/react"
 import {SettingsGroup} from "@/shared/components/settings/SettingsGroup"
 import {SettingsGroupItem} from "@/shared/components/settings/SettingsGroupItem"
 import {getSessionManager} from "@/shared/services/PrivateChats"
@@ -8,7 +8,6 @@ import {confirm, alert} from "@/utils/utils"
 
 interface DeviceInfo {
   id: string
-  label?: string
   isCurrent: boolean
   createdAt: number
   staleAt?: number
@@ -19,8 +18,6 @@ const ChatSettings = () => {
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [showStale, setShowStale] = useState(false)
-  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null)
-  const [editingLabel, setEditingLabel] = useState("")
 
   type SessionManagerInstance = NonNullable<ReturnType<typeof getSessionManager>>
 
@@ -34,36 +31,23 @@ const ChatSettings = () => {
     if (!publicKey) return []
 
     const currentDeviceId = manager.getDeviceId()
-    const deviceList: DeviceInfo[] = []
+    const userRecord = manager.getUserRecords().get(publicKey)
 
-    // Get all own devices from InviteList (authoritative source)
-    const ownDevices = manager.getOwnDevices()
-    for (const device of ownDevices) {
-      deviceList.push({
+    if (!userRecord) return []
+
+    const currentDevice = userRecord.devices.get(currentDeviceId)
+    const otherDevices = Array.from(userRecord.devices.entries()).filter(
+      ([deviceId]) => deviceId !== currentDeviceId
+    )
+
+    const deviceList = [currentDevice, ...otherDevices.map(([, d]) => d)]
+      .filter((device) => device !== undefined)
+      .map((device) => ({
         id: device.deviceId,
-        label: device.deviceLabel,
         isCurrent: device.deviceId === currentDeviceId,
         createdAt: device.createdAt,
-      })
-    }
-
-    // Get stale devices from session records (they have the staleAt timestamp)
-    const userRecord = manager.getUserRecords().get(publicKey)
-    if (userRecord) {
-      for (const [, device] of userRecord.devices.entries()) {
-        if (device.staleAt !== undefined) {
-          // Only add if not already in the list from InviteList
-          if (!deviceList.some((d) => d.id === device.deviceId)) {
-            deviceList.push({
-              id: device.deviceId,
-              isCurrent: false,
-              createdAt: device.createdAt,
-              staleAt: device.staleAt,
-            })
-          }
-        }
-      }
-    }
+        staleAt: device.staleAt,
+      }))
 
     return deviceList
   }
@@ -119,144 +103,25 @@ const ChatSettings = () => {
     (device) => device.staleAt !== undefined && !device.isCurrent
   )
 
-  // Edit device label
-  const handleStartEdit = (device: DeviceInfo) => {
-    setEditingDeviceId(device.id)
-    setEditingLabel(device.label || device.id)
-  }
-
-  const handleSaveLabel = async () => {
-    if (!editingDeviceId) return
-
-    try {
-      setLoading(true)
-      const manager = getSessionManager()
-      if (!manager) throw new Error("SessionManager not available")
-
-      await manager.updateDeviceLabel(editingDeviceId, editingLabel)
-      await refreshDeviceList(manager)
-      setEditingDeviceId(null)
-      setEditingLabel("")
-    } catch (error) {
-      console.error("Failed to update label:", error)
-      await alert("Failed to update device label")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleCancelEdit = () => {
-    setEditingDeviceId(null)
-    setEditingLabel("")
-  }
-
-  const handleDeleteDevice = async (deviceId: string) => {
-    if (!(await confirm(`Delete invite for device ${deviceId.slice(0, 8)}?`))) {
-      return
-    }
-
-    try {
-      setLoading(true)
-      const manager = getSessionManager()
-      await manager.revokeDevice(deviceId)
-      await refreshDeviceList(manager)
-      setLoading(false)
-    } catch (error) {
-      console.error("Failed to delete invite:", error)
-      await alert("Failed to delete invite")
-      setLoading(false)
-    }
-  }
-
   const renderDeviceItem = (device: DeviceInfo, isLast: boolean) => {
     const deviceFoundDate = formatDeviceFoundDate(device.createdAt)
     const staleSinceDate = formatDeviceFoundDate(device.staleAt)
     const isStale = device.staleAt !== undefined
-    const isEditing = editingDeviceId === device.id
 
     return (
       <SettingsGroupItem key={device.id} isLast={isLast}>
-        <div
-          className="flex items-start justify-between"
-          data-testid={`device-item-${device.id}`}
-        >
+        <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              {isEditing ? (
-                <div className="flex items-center gap-2" data-testid="device-edit-form">
-                  <input
-                    type="text"
-                    value={editingLabel}
-                    onChange={(e) => setEditingLabel(e.target.value)}
-                    className="input input-sm input-bordered"
-                    autoFocus
-                    data-testid="device-label-input"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSaveLabel()
-                      if (e.key === "Escape") handleCancelEdit()
-                    }}
-                  />
-                  <button
-                    onClick={handleSaveLabel}
-                    className="btn btn-sm btn-primary"
-                    data-testid="device-label-save"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={handleCancelEdit}
-                    className="btn btn-sm btn-ghost"
-                    data-testid="device-label-cancel"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {device.label ? (
-                    <>
-                      <span className="font-medium" data-testid="device-label">
-                        {device.label}
-                      </span>
-                      <span
-                        className="font-mono text-xs text-base-content/50"
-                        data-testid="device-id"
-                      >
-                        {device.id}
-                      </span>
-                    </>
-                  ) : (
-                    <span
-                      className="font-medium font-mono text-sm"
-                      data-testid="device-id"
-                    >
-                      {device.id}
-                    </span>
-                  )}
-                  {device.isCurrent && (
-                    <span
-                      className="badge badge-primary badge-sm"
-                      data-testid="current-device-badge"
-                    >
-                      Current
-                    </span>
-                  )}
-                  {isStale && (
-                    <span
-                      className="badge badge-warning badge-sm"
-                      data-testid="stale-device-badge"
-                    >
-                      Stale
-                    </span>
-                  )}
-                </>
+              <span className="font-medium font-mono text-sm">{device.id}</span>
+              {device.isCurrent && (
+                <span className="badge badge-primary badge-sm">Current</span>
               )}
+              {isStale && <span className="badge badge-warning badge-sm">Stale</span>}
             </div>
-            {deviceFoundDate && !isEditing && (
+            {deviceFoundDate && (
               <div className="text-xs text-base-content/50">
-                {device.isCurrent
-                  ? `Created ${deviceFoundDate}`
-                  : `We first found and messaged this device on ${deviceFoundDate}`}
+                We first found and messaged this device on {deviceFoundDate}
               </div>
             )}
             {isStale && staleSinceDate && (
@@ -270,27 +135,14 @@ const ChatSettings = () => {
               </div>
             )}
           </div>
-          {!isEditing && !isStale && (
-            <div className="flex items-center gap-1 ml-4">
-              <button
-                onClick={() => handleStartEdit(device)}
-                className="btn btn-ghost btn-sm text-base-content/70 hover:bg-base-300"
-                title="Edit device label"
-                data-testid="device-edit-button"
-              >
-                <RiEdit2Line size={16} />
-              </button>
-              {!device.isCurrent && (
-                <button
-                  onClick={() => handleDeleteDevice(device.id)}
-                  className="btn btn-ghost btn-sm text-error hover:bg-error/20"
-                  title="Delete device / app invite"
-                  data-testid="device-delete-button"
-                >
-                  <RiDeleteBin6Line size={16} />
-                </button>
-              )}
-            </div>
+          {!device.isCurrent && !isStale && (
+            <button
+              onClick={() => handleDeleteDevice(device.id)}
+              className="btn btn-ghost btn-sm text-error hover:bg-error/20 ml-4"
+              title="Delete device / app invite"
+            >
+              <RiDeleteBin6Line size={16} />
+            </button>
           )}
         </div>
       </SettingsGroupItem>
@@ -326,9 +178,27 @@ const ChatSettings = () => {
     )
   }
 
+  const handleDeleteDevice = async (deviceId: string) => {
+    if (!(await confirm(`Delete invite for device ${deviceId.slice(0, 8)}?`))) {
+      return
+    }
+
+    try {
+      setLoading(true)
+      const manager = getSessionManager()
+      await manager.revokeDevice(deviceId)
+      await refreshDeviceList(manager)
+      setLoading(false)
+    } catch (error) {
+      console.error("Failed to delete invite:", error)
+      await alert("Failed to delete invite")
+      setLoading(false)
+    }
+  }
+
   if (!publicKey) {
     return (
-      <div className="bg-base-200 min-h-full" data-testid="chat-settings-signed-out">
+      <div className="bg-base-200 min-h-full">
         <div className="p-4">
           <div className="text-center py-8 text-base-content/70">
             Please sign in to manage your chat settings.
@@ -339,7 +209,7 @@ const ChatSettings = () => {
   }
 
   return (
-    <div className="bg-base-200 min-h-full" data-testid="chat-settings">
+    <div className="bg-base-200 min-h-full">
       <div className="p-4">
         <div className="mb-6">
           <p className="text-base-content/70">
@@ -349,7 +219,7 @@ const ChatSettings = () => {
         </div>
 
         {currentDevice && (
-          <div className="mb-6" data-testid="this-device-section">
+          <div className="mb-6">
             <SettingsGroup title="This Device">
               {renderDeviceItem(currentDevice, true)}
             </SettingsGroup>
@@ -368,7 +238,7 @@ const ChatSettings = () => {
             {!loading && otherActiveDevices.length === 0 && staleDevices.length === 0 && (
               <SettingsGroupItem isLast>
                 <div className="text-center py-4">
-                  <p className="text-base-content/70">No other devices / apps found.</p>
+                  <p className="text-base-content/70">No device / app invites found.</p>
                 </div>
               </SettingsGroupItem>
             )}

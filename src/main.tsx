@@ -21,7 +21,10 @@ import {
   enable as enableAutostart,
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart"
-import {cleanupSessionEventListener} from "./utils/dmEventHandler"
+import {
+  attachSessionEventListener,
+  cleanupSessionEventListener,
+} from "./utils/dmEventHandler"
 import {peerConnectionManager} from "./utils/chat/webrtc/PeerConnectionManager"
 import {hasWriteAccess} from "./utils/auth"
 
@@ -147,9 +150,9 @@ const initializeApp = async () => {
       })().catch(error)
     }
 
-    // Start WebRTC peer connection manager if not in readonly mode
-    // Note: DM session initialization is now explicit via ChatInitGuard
+    // Only initialize DM sessions if not in readonly mode
     if (hasWriteAccess()) {
+      attachSessionEventListener()
       peerConnectionManager.start()
     }
   }
@@ -200,9 +203,9 @@ const unsubscribeUser = useUserStore.subscribe((state, prevState) => {
     subscribeToDMNotifications()
     void migratePublicChats()
 
-    // Start WebRTC peer connection manager if not in readonly mode
-    // Note: DM session initialization is now explicit via ChatInitGuard
+    // Only initialize DM sessions if not in readonly mode
     if (hasWriteAccess()) {
+      attachSessionEventListener()
       peerConnectionManager.start()
     }
   }
