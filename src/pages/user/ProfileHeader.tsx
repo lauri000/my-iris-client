@@ -1,10 +1,7 @@
 import {PublicKey} from "@/shared/utils/PublicKey"
-import {useMemo, useState, useEffect} from "react"
+import {useEffect, useMemo, useState} from "react"
 import {Link, useNavigate} from "@/navigation"
 import {useUserStore} from "@/stores/user"
-import {Invite} from "nostr-double-ratchet/src"
-import {ndk} from "@/utils/ndk"
-import {Filter, VerifiedEvent} from "nostr-tools"
 import {useNip05Validation} from "@/shared/hooks/useNip05Validation"
 import {NIP05_REGEX} from "@/utils/validation"
 import {SubscriberBadge} from "@/shared/components/user/SubscriberBadge"
@@ -24,11 +21,10 @@ import useProfile from "@/shared/hooks/useProfile.ts"
 import Modal from "@/shared/components/ui/Modal.tsx"
 import Icon from "@/shared/components/Icons/Icon"
 import {Helmet} from "react-helmet"
-import {createDebugLogger} from "@/utils/createDebugLogger"
-import {DEBUG_NAMESPACES} from "@/utils/constants"
+import {fetchEventsReliable} from "@/utils/fetchEventsReliable"
 
-const {log} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
-
+const INVITE_LIST_KIND = 10078
+const INVITE_LIST_D_TAG = "double-ratchet/invite-list"
 const ProfileHeader = ({
   pubKey,
   showHeader = true,
@@ -46,34 +42,43 @@ const ProfileHeader = ({
 
   const [showProfilePhotoModal, setShowProfilePhotoModal] = useState(false)
   const [showBannerModal, setShowBannerModal] = useState(false)
-  const [hasInvites, setHasInvites] = useState(false)
+  const [hasInviteList, setHasInviteList] = useState(false)
 
   const navigate = useNavigate()
 
-  // Subscribe function for nostr events
-  const subscribe = (filter: Filter, onEvent: (event: VerifiedEvent) => void) => {
-    const sub = ndk().subscribe(filter)
-    sub.on("event", (e) => onEvent(e as unknown as VerifiedEvent))
-    return () => sub.stop()
-  }
-
-  // Check for invites from other users
   useEffect(() => {
-    // Only check for invites if this is not our own profile and we have a pubkey
-    if (!myPubKey || myPubKey === pubKeyHex || !pubKeyHex) {
+    if (!pubKeyHex || !myPubKey || myPubKey === pubKeyHex) {
+      setHasInviteList(false)
       return
     }
 
-    log("Checking for invites from user:", pubKeyHex)
+    let cancelled = false
+    setHasInviteList(false)
 
-    const unsubscribe = Invite.fromUser(pubKeyHex, subscribe, (invite) => {
-      log("Found invite from user:", pubKeyHex, invite)
-      setHasInvites(true)
-    })
+    const {promise, unsubscribe} = fetchEventsReliable(
+      {
+        kinds: [INVITE_LIST_KIND],
+        authors: [pubKeyHex],
+        "#d": [INVITE_LIST_D_TAG],
+        limit: 1,
+      },
+      {timeout: 3000}
+    )
 
-    // Cleanup subscription on unmount
+    promise
+      .then((events) => {
+        if (!cancelled) {
+          setHasInviteList(events.length > 0)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasInviteList(false)
+        }
+      })
+
     return () => {
-      log("Cleaning up invite subscription for user:", pubKeyHex)
+      cancelled = true
       unsubscribe()
     }
   }, [pubKeyHex, myPubKey])
@@ -137,7 +142,7 @@ const ProfileHeader = ({
             )}
 
             <div className="flex flex-row gap-2" data-testid="profile-header-actions">
-              {myPubKey && (myPubKey === pubKeyHex || hasInvites) && (
+              {myPubKey && pubKeyHex && (myPubKey === pubKeyHex || hasInviteList) && (
                 <button className="btn btn-circle btn-neutral" onClick={handleStartChat}>
                   <Icon name="mail-outline" className="w-6 h-6" />
                 </button>
