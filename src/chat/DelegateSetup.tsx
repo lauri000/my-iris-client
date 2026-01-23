@@ -6,12 +6,11 @@ import {
 } from "@/shared/services/DelegateDevice"
 import {useDelegateDeviceStore, DelegateDeviceCredentials} from "@/stores/delegateDevice"
 import {
-  DelegateDeviceManager,
-  DevicePayload,
+  DelegateManager,
+  DelegatePayload,
   NostrPublish,
   NostrSubscribe,
 } from "nostr-double-ratchet/src"
-import {generateDeviceId} from "nostr-double-ratchet/src/inviteUtils"
 import {bytesToHex} from "@noble/hashes/utils"
 import {ndk} from "@/utils/ndk"
 import {VerifiedEvent} from "nostr-tools"
@@ -24,16 +23,15 @@ interface DelegateSetupProps {
 type SetupStep = "generating" | "showCode" | "error"
 
 /**
- * Create pairing code from stored credentials (public info only)
+ * Create pairing code from stored credentials (identity info only)
+ * Note: Ephemeral keys are no longer in the pairing code - they're published
+ * separately in the device's Invite event
  */
 function createPairingCodeFromCredentials(
   credentials: DelegateDeviceCredentials
 ): string {
-  const payload: DevicePayload = {
-    ephemeralPubkey: credentials.ephemeralPublicKey,
-    sharedSecret: credentials.sharedSecret,
-    deviceId: credentials.deviceId,
-    deviceLabel: credentials.deviceLabel,
+  // New simplified payload - only identityPubkey needed
+  const payload: DelegatePayload = {
     identityPubkey: credentials.devicePublicKey,
   }
   return btoa(JSON.stringify(payload))
@@ -78,11 +76,19 @@ export default function DelegateSetup({onActivated}: DelegateSetupProps) {
     // activation. closeDelegateDevice() is only called explicitly on "Start Over".
   }, [step, credentials, onActivated])
 
-  const generatePairingCode = (label: string) => {
+  // Note: deviceLabel is no longer used in the protocol, but kept for local display
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const generatePairingCode = async (_label: string) => {
     const ndkInstance = ndk()
 
-    const nostrSubscribe: NostrSubscribe = (filter, onEvent) => {
-      const subscription = ndkInstance.subscribe(filter as NDKFilter)
+    // Context for signing - will be set after manager is created
+    let signingKey: Uint8Array | null = null
+
+    const nostrSubscribe: NostrSubscribe = (
+      filter: NDKFilter,
+      onEvent: (e: VerifiedEvent) => void
+    ) => {
+      const subscription = ndkInstance.subscribe(filter)
       subscription.on("event", (event: NDKEvent) => {
         onEvent(event as unknown as VerifiedEvent)
       })
@@ -91,47 +97,76 @@ export default function DelegateSetup({onActivated}: DelegateSetupProps) {
     }
 
     const nostrPublish: NostrPublish = (async (event) => {
-      const e = new NDKEvent(ndkInstance, event)
+      // Sign unsigned events (like Invite) with the device's key
+      if (!("sig" in event) || !event.sig) {
+        if (!signingKey) {
+          throw new Error("Signing key not set")
+        }
+        const {finalizeEvent} = await import("nostr-tools")
+        const signedEvent = finalizeEvent(event, signingKey)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const e = new NDKEvent(ndkInstance, signedEvent as any)
+        await e.publish()
+        return signedEvent
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = new NDKEvent(ndkInstance, event as any)
       await e.publish()
       return event
     }) as NostrPublish
 
-    // Generate keys locally using DelegateDeviceManager.create()
-    const {manager, payload} = DelegateDeviceManager.create({
-      deviceId: generateDeviceId(),
-      deviceLabel: label,
+    // Generate keys locally using DelegateManager.create()
+    // New API - no deviceId/deviceLabel needed
+    const {manager, payload} = DelegateManager.create({
       nostrSubscribe,
       nostrPublish,
     })
 
-    // Store credentials locally (including private keys)
-    // DelegateDeviceManager.getIdentityKey() always returns Uint8Array
+    // Set the signing key before init() so Invite can be published
     const devicePrivateKey = manager.getIdentityKey()
+    signingKey = devicePrivateKey
+
+    // Initialize the manager - this publishes the Invite event
+    await manager.init()
+
+    // Get ephemeral keys from the Invite
+    const invite = manager.getInvite()
+    if (!invite || !invite.inviterEphemeralPrivateKey) {
+      throw new Error("Invite not created properly")
+    }
+
+    // Store credentials locally (including private keys from Invite)
+    // Note: deviceId/deviceLabel kept for backwards compatibility with local storage
     const credentials = {
       devicePublicKey: manager.getIdentityPublicKey(),
       devicePrivateKey: bytesToHex(devicePrivateKey),
-      ephemeralPublicKey: manager.getEphemeralKeypair()!.publicKey,
-      ephemeralPrivateKey: bytesToHex(manager.getEphemeralKeypair()!.privateKey),
-      sharedSecret: manager.getSharedSecret()!,
-      deviceId: manager.getDeviceId(),
-      deviceLabel: payload.deviceLabel,
+      ephemeralPublicKey: invite.inviterEphemeralPublicKey,
+      ephemeralPrivateKey: bytesToHex(invite.inviterEphemeralPrivateKey),
+      sharedSecret: invite.sharedSecret,
+      deviceId: manager.getIdentityPublicKey(), // Use identityPubkey as deviceId
+      deviceLabel: manager.getIdentityPublicKey().slice(0, 8), // Short label from pubkey
     }
     setCredentials(credentials)
 
-    // Create pairing code with PUBLIC info only (DevicePayload)
-    const publicPayload: DevicePayload = payload
-    const code = btoa(JSON.stringify(publicPayload))
+    // Create pairing code with identity info only (DelegatePayload)
+    // Ephemeral keys are published separately in the Invite event
+    const code = btoa(JSON.stringify(payload))
     setPairingCode(code)
     setStep("showCode")
   }
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!deviceLabel.trim()) {
       setError("Please enter a device name")
       return
     }
     setError("")
-    generatePairingCode(deviceLabel.trim())
+    try {
+      await generatePairingCode(deviceLabel.trim())
+    } catch (err) {
+      console.error("Failed to generate pairing code:", err)
+      setError(err instanceof Error ? err.message : "Failed to generate pairing code")
+    }
   }
 
   const handleCopy = async () => {

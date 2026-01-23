@@ -5,7 +5,7 @@ import {SettingsGroup} from "@/shared/components/settings/SettingsGroup"
 import {SettingsGroupItem} from "@/shared/components/settings/SettingsGroupItem"
 import {getSessionManagerAsync, getDeviceManager} from "@/shared/services/PrivateChats"
 import {confirm, alert} from "@/utils/utils"
-import {DevicePayload} from "nostr-double-ratchet/src"
+import {DelegatePayload} from "nostr-double-ratchet/src"
 
 interface DeviceInfo {
   id: string
@@ -175,8 +175,8 @@ const ChatSettings = () => {
     )
   }
 
-  const handleDeleteDevice = async (deviceId: string) => {
-    if (!(await confirm(`Delete invite for device ${deviceId.slice(0, 8)}?`))) {
+  const handleDeleteDevice = async (identityPubkey: string) => {
+    if (!(await confirm(`Delete invite for device ${identityPubkey.slice(0, 8)}?`))) {
       return
     }
 
@@ -184,7 +184,7 @@ const ChatSettings = () => {
       setLoading(true)
       const deviceManager = getDeviceManager()
       await deviceManager.init()
-      await deviceManager.revokeDevice(deviceId)
+      await deviceManager.revokeDevice(identityPubkey)
       const sessionManager = await getSessionManagerAsync()
       await refreshDeviceList(sessionManager)
       setLoading(false)
@@ -206,7 +206,7 @@ const ChatSettings = () => {
 
     try {
       // Parse pairing code
-      let payload: DevicePayload
+      let payload: DelegatePayload
       try {
         payload = JSON.parse(atob(pairingCodeInput.trim()))
       } catch {
@@ -215,15 +215,9 @@ const ChatSettings = () => {
         return
       }
 
-      // Validate required fields
-      if (
-        !payload.ephemeralPubkey ||
-        !payload.sharedSecret ||
-        !payload.deviceId ||
-        !payload.deviceLabel ||
-        !payload.identityPubkey
-      ) {
-        setPairingError("Pairing code is missing required fields")
+      // Validate required field (new format: only identityPubkey needed)
+      if (!payload.identityPubkey) {
+        setPairingError("Pairing code is missing required identityPubkey field")
         setAddingDevice(false)
         return
       }

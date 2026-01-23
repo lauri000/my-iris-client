@@ -1,11 +1,12 @@
-import {VerifiedEvent} from "nostr-tools"
+import {VerifiedEvent, finalizeEvent} from "nostr-tools"
 import {LocalForageStorageAdapter} from "../../session/StorageAdapter"
 import {
   NostrPublish,
   NostrSubscribe,
-  DelegateDeviceManager,
+  DelegateManager,
   SessionManager,
   InviteList,
+  Invite,
   INVITE_LIST_EVENT_KIND,
   Rumor,
 } from "nostr-double-ratchet/src"
@@ -14,7 +15,6 @@ import {ndk} from "@/utils/ndk"
 import {
   useDelegateDeviceStore,
   getDevicePrivateKeyBytes,
-  getEphemeralPrivateKeyBytes,
   DelegateDeviceCredentials,
 } from "@/stores/delegateDevice"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
@@ -105,14 +105,14 @@ const createPublish = (ndkInstance: NDK): NostrPublish => {
   }) as NostrPublish
 }
 
-let deviceManager: DelegateDeviceManager | null = null
+let delegateManager: DelegateManager | null = null
 let sessionManager: SessionManager | null = null
 
 /**
- * Get or create the DeviceManager for delegate device operation
+ * Get or create the DelegateManager for delegate device operation
  */
-export const getDelegateDeviceManager = (): DelegateDeviceManager | null => {
-  if (deviceManager) return deviceManager
+export const getDelegateDeviceManager = (): DelegateManager | null => {
+  if (delegateManager) return delegateManager
 
   const credentials = useDelegateDeviceStore.getState().credentials
   if (!credentials) {
@@ -120,8 +120,8 @@ export const getDelegateDeviceManager = (): DelegateDeviceManager | null => {
     return null
   }
 
-  deviceManager = createDelegateDeviceManager(credentials)
-  return deviceManager
+  delegateManager = createDelegateDeviceManager(credentials)
+  return delegateManager
 }
 
 /**
@@ -142,55 +142,48 @@ export const getDelegateSessionManager = (): SessionManager | null => {
   if (!credentials) return null
   if (!credentials.ownerPublicKey) return null // Must be activated first
 
-  const ndkInstance = ndk()
-
   log("[DelegateDevice] getDelegateSessionManager creating new SessionManager", {
-    deviceId: credentials.deviceId,
     devicePublicKey: credentials.devicePublicKey?.slice(0, 8),
     ownerPublicKey: credentials.ownerPublicKey?.slice(0, 8),
   })
 
-  // IMPORTANT: Must use delegate's own devicePublicKey (not owner's pubkey) for DH encryption
-  // to work correctly. The pubkey passed to SessionManager is used for DH key derivation
-  // during invite handshakes, so it MUST match the private key being used.
-  // UI attribution (showing messages on correct side) is handled separately in the event listener.
-  sessionManager = new SessionManager(
-    credentials.devicePublicKey,
-    getDevicePrivateKeyBytes(credentials),
-    credentials.deviceId,
-    createSubscribe(ndkInstance),
-    createPublish(ndkInstance),
-    credentials.ownerPublicKey,
-    {
-      ephemeralKeypair: {
-        publicKey: credentials.ephemeralPublicKey,
-        privateKey: getEphemeralPrivateKeyBytes(credentials),
-      },
-      sharedSecret: credentials.sharedSecret,
-    },
-    new LocalForageStorageAdapter()
-  )
+  // Use DeviceManager to create properly configured SessionManager
+  // This gets ephemeral keys from the stored Invite
+  sessionManager = dm.createSessionManager(new LocalForageStorageAdapter())
 
   return sessionManager
 }
 
 /**
- * Create a DeviceManager from credentials
+ * Create a DelegateManager from credentials
  */
 export const createDelegateDeviceManager = (
   credentials: DelegateDeviceCredentials
-): DelegateDeviceManager => {
+): DelegateManager => {
   const ndkInstance = ndk()
+  const devicePrivateKey = getDevicePrivateKeyBytes(credentials)
 
-  return DelegateDeviceManager.restore({
-    deviceId: credentials.deviceId,
+  // Create a publish function that can sign events with the delegate's key
+  const delegatePublish: NostrPublish = (async (event) => {
+    // Sign unsigned events (like Invite)
+    if (!("sig" in event) || !event.sig) {
+      const signedEvent = finalizeEvent(event, devicePrivateKey)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = new NDKEvent(ndkInstance, signedEvent as any)
+      await e.publish()
+      return signedEvent
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const e = new NDKEvent(ndkInstance, event as any)
+    await e.publish()
+    return event
+  }) as NostrPublish
+
+  return DelegateManager.restore({
     devicePublicKey: credentials.devicePublicKey,
-    devicePrivateKey: getDevicePrivateKeyBytes(credentials),
-    ephemeralPublicKey: credentials.ephemeralPublicKey,
-    ephemeralPrivateKey: getEphemeralPrivateKeyBytes(credentials),
-    sharedSecret: credentials.sharedSecret,
+    devicePrivateKey,
     nostrSubscribe: createSubscribe(ndkInstance),
-    nostrPublish: createPublish(ndkInstance),
+    nostrPublish: delegatePublish,
     storage: new LocalForageStorageAdapter(),
   })
 }
@@ -276,9 +269,9 @@ export const checkDelegateDeviceRevoked = async (): Promise<boolean> => {
  * Clean up the delegate device manager
  */
 export const closeDelegateDevice = () => {
-  if (deviceManager) {
-    deviceManager.close()
-    deviceManager = null
+  if (delegateManager) {
+    delegateManager.close()
+    delegateManager = null
   }
   if (sessionManager) {
     sessionManager.close()
@@ -363,7 +356,7 @@ export const isDelegateDevice = (): boolean => {
 
 /**
  * Initiate a session with a recipient from the delegate device.
- * This fetches the recipient's InviteList and establishes sessions with their devices.
+ * Uses two-step discovery: InviteList -> Invite events -> accept
  */
 export const initiateSessionFromDelegate = async (
   recipientPublicKey: string
@@ -379,7 +372,7 @@ export const initiateSessionFromDelegate = async (
 
   log("Initiating session with:", recipientPublicKey)
 
-  // Fetch recipient's InviteList
+  // Step 1: Fetch recipient's InviteList to get device identities
   const inviteList = await new Promise<InviteList | null>((resolve) => {
     let resolved = false
     const timeout = setTimeout(() => {
@@ -425,27 +418,61 @@ export const initiateSessionFromDelegate = async (
 
   log("Found", devices.length, "devices for recipient")
 
-  // Accept invite from each device to establish sessions
+  // Step 2: For each device, fetch their Invite event and accept it
   let sessionsCreated = 0
   for (const device of devices) {
     try {
-      const {event} = await inviteList.accept(
-        device.deviceId,
+      // Fetch the device's Invite event
+      // In the new architecture, identityPubkey serves as both device identifier and deviceId
+      const invite = await new Promise<Invite | null>((resolve) => {
+        let resolved = false
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true
+            unsubscribe()
+            resolve(null)
+          }
+        }, 5000)
+
+        const unsubscribe = Invite.fromUser(
+          device.identityPubkey,
+          nostrSubscribe,
+          (inv: Invite) => {
+            // Accept invite matching this device's identity pubkey
+            if (inv.deviceId === device.identityPubkey) {
+              if (!resolved) {
+                resolved = true
+                clearTimeout(timeout)
+                unsubscribe()
+                resolve(inv)
+              }
+            }
+          }
+        )
+      })
+
+      if (!invite) {
+        log("No Invite found for device:", device.identityPubkey.slice(0, 8))
+        continue
+      }
+
+      // Accept the invite to establish session
+      // Use devicePublicKey as our device identifier (same as identityPubkey)
+      const {event} = await invite.accept(
         nostrSubscribe,
         credentials.devicePublicKey, // Our public key
         getDevicePrivateKeyBytes(credentials), // Our private key for encryption
-        credentials.deviceId, // Our device ID
-        credentials.ownerPublicKey // Owner's public key for message routing
+        credentials.devicePublicKey // Our device ID (now same as identity pubkey)
       )
 
       // Publish the invite response
       await nostrPublish(event)
-      log("Published invite response to device:", device.deviceId)
+      log("Published invite response to device:", device.identityPubkey.slice(0, 8))
 
       // The session is now active - SessionManager should pick it up via invite response listener
       sessionsCreated++
     } catch (err) {
-      log("Failed to accept invite from device:", device.deviceId, err)
+      log("Failed to accept invite from device:", device.identityPubkey.slice(0, 8), err)
     }
   }
 
