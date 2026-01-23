@@ -211,26 +211,22 @@ const initializeManagers = async (): Promise<void> => {
   const ndkInstance = ndk()
   await waitForRelayConnection(ndkInstance)
 
+  const {publicKey} = useUserStore.getState()
+
   // 1. Initialize DeviceManager (InviteList authority)
   const deviceManager = getDeviceManager()
   await deviceManager.init()
 
-  // 2. For main device, store owner pubkey BEFORE DelegateManager.init()
-  // This makes waitForActivation() return immediately since init() will find it
-  // (For delegate devices on other machines, they discover owner via subscription)
-  const {publicKey} = useUserStore.getState()
-  const ownerPubkeyKey = "v3/device-manager/owner-pubkey"
-  const mainDelegateStorage = new LocalForageStorageAdapter()
-  await mainDelegateStorage.put(ownerPubkeyKey, publicKey)
-
-  // 3. Get or create DelegateManager (device identity)
+  // 2. Get or create DelegateManager (device identity)
   const delegateManager = await getDelegateManager()
-  await delegateManager.init() // Will find owner pubkey in storage
+  await delegateManager.init()
 
-  // 4. Check if this device is already in the InviteList
+  // 3. Check if this device is already in the InviteList
   const devices = deviceManager.getOwnDevices()
   const delegatePubkey = delegateManager.getIdentityPublicKey()
-  const isDeviceInList = devices.some((d) => d.identityPubkey === delegatePubkey)
+  const isDeviceInList = devices.some(
+    (d: {identityPubkey: string}) => d.identityPubkey === delegatePubkey
+  )
 
   if (!isDeviceInList) {
     // Add this device to InviteList (same as adding any delegate device)
@@ -238,10 +234,11 @@ const initializeManagers = async (): Promise<void> => {
     log("Added main device to InviteList:", delegatePubkey.slice(0, 8))
   }
 
-  // 5. Wait for activation (instant since owner pubkey already in storage)
-  await delegateManager.waitForActivation(5000)
+  // 4. Activate directly - we know we're the owner, no need to fetch from relay
+  // (For delegate devices on other machines, they use waitForActivation() instead)
+  await delegateManager.activate(publicKey)
 
-  // 6. Create SessionManager from DelegateManager
+  // 5. Create SessionManager from DelegateManager
   sessionManagerInstance = delegateManager.createSessionManager()
   await sessionManagerInstance!.init()
 }
