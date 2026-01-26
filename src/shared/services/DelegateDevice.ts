@@ -62,22 +62,24 @@ const attachDelegateEventListener = (
       event.pubkey === ownerPublicKey ||
       (delegatePubkey && event.pubkey === delegatePubkey)
 
-    // from = the other party in the conversation
-    // to = us (always owner's pubkey, regardless of which device received it)
-    const from = sessionPubkey
-    const to = ownerPublicKey
+    // Calculate chatId using the resolved owner pubkey from SessionManager
+    // sessionPubkey is already resolved to owner pubkey (not device identity)
+    // - If we sent it: chatId = recipient (pTag)
+    // - If we received it: chatId = sender's owner pubkey (sessionPubkey)
+    const chatId = isFromUs ? pTag : sessionPubkey
 
-    if (!from || !to) return
+    if (!chatId) return
 
-    console.warn("[DelegateDevice] DM identity resolution:", {
-      from: from?.slice(0, 8),
-      to: to?.slice(0, 8),
+    log("[DelegateDevice] DM identity resolution:", {
+      chatId: chatId?.slice(0, 8),
       isFromUs,
+      eventPubkey: event.pubkey?.slice(0, 8),
+      sessionPubkey: sessionPubkey?.slice(0, 8),
       pTag: pTag?.slice(0, 8),
     })
 
-    void usePrivateMessagesStore.getState().upsert(from, to, event)
-    log("[DelegateDevice] upsert called for chat:", from?.slice(0, 8))
+    void usePrivateMessagesStore.getState().upsert(chatId, ownerPublicKey, event)
+    log("[DelegateDevice] upsert called for chat:", chatId?.slice(0, 8))
   })
 }
 
@@ -457,12 +459,12 @@ export const initiateSessionFromDelegate = async (
       }
 
       // Accept the invite to establish session
-      // Use devicePublicKey as our device identifier (same as identityPubkey)
+      // inviteePublicKey serves as both identity and device ID
       const {event} = await invite.accept(
         nostrSubscribe,
-        credentials.devicePublicKey, // Our public key
+        credentials.devicePublicKey, // Our public key (also serves as device ID)
         getDevicePrivateKeyBytes(credentials), // Our private key for encryption
-        credentials.devicePublicKey // Our device ID (now same as identity pubkey)
+        credentials.ownerPublicKey! // Our owner's pubkey (for chat routing)
       )
 
       // Publish the invite response

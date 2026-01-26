@@ -9,6 +9,7 @@ import {isTauri} from "./utils"
 import {getSocialGraph} from "./socialGraph"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
+import {Rumor} from "nostr-double-ratchet/src"
 
 const {log, error} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
@@ -30,68 +31,72 @@ export const attachSessionEventListener = () => {
       unsubscribeSessionEvents?.()
       // Note: SessionManager now resolves delegate pubkeys to owner pubkeys internally
       // so pubKey is always the owner's pubkey, even for messages from delegate devices
-      unsubscribeSessionEvents = sessionManager.onEvent((event, pubKey) => {
-        const {publicKey} = useUserStore.getState()
-        if (!publicKey) return
+      unsubscribeSessionEvents = sessionManager.onEvent(
+        (event: Rumor, pubKey: string) => {
+          const {publicKey} = useUserStore.getState()
+          if (!publicKey) return
 
-        // Block events from muted users
-        const mutedUsers = getSocialGraph().getMutedByUser(publicKey)
-        if (mutedUsers.has(pubKey)) return
+          // Block events from muted users
+          const mutedUsers = getSocialGraph().getMutedByUser(publicKey)
+          if (mutedUsers.has(pubKey)) return
 
-        // Trigger desktop notification for DMs if on desktop
-        if (isTauri() && event.pubkey !== publicKey) {
-          import("./desktopNotifications").then(({handleDMEvent}) => {
-            handleDMEvent(event, pubKey).catch(console.error)
-          })
-        }
-
-        // Check if it's a group creation event
-        const lTag = getTag("l", event.tags)
-        if (event.kind === KIND_CHANNEL_CREATE && lTag) {
-          try {
-            const group = JSON.parse(event.content)
-            const {addGroup} = useGroupsStore.getState()
-            addGroup(group)
-            log("Received group creation:", group.name, group.id)
-          } catch (e) {
-            error("Failed to parse group creation event:", e)
+          // Trigger desktop notification for DMs if on desktop
+          if (isTauri() && event.pubkey !== publicKey) {
+            import("./desktopNotifications").then(({handleDMEvent}) => {
+              handleDMEvent(event, pubKey).catch(console.error)
+            })
           }
-          return
-        }
 
-        // Check if it's a group message (has l tag but not group creation)
-        if (lTag) {
-          // Create placeholder group if we don't have metadata yet
-          const {groups, addGroup} = useGroupsStore.getState()
-          if (!groups[lTag]) {
-            const placeholderGroup = {
-              id: lTag,
-              name: `Group ${lTag.slice(0, 8)}`,
-              description: "",
-              picture: "",
-              members: [publicKey],
-              createdAt: Date.now(),
+          // Check if it's a group creation event
+          const lTag = getTag("l", event.tags)
+          if (event.kind === KIND_CHANNEL_CREATE && lTag) {
+            try {
+              const group = JSON.parse(event.content)
+              const {addGroup} = useGroupsStore.getState()
+              addGroup(group)
+              log("Received group creation:", group.name, group.id)
+            } catch (e) {
+              error("Failed to parse group creation event:", e)
             }
-            addGroup(placeholderGroup)
-            log("Created placeholder group:", lTag)
+            return
           }
 
-          // Group message or reaction - store under group ID
-          log("Received group message for group:", lTag)
-          void usePrivateMessagesStore.getState().upsert(lTag, publicKey, event)
-          return
+          // Check if it's a group message (has l tag but not group creation)
+          if (lTag) {
+            // Create placeholder group if we don't have metadata yet
+            const {groups, addGroup} = useGroupsStore.getState()
+            if (!groups[lTag]) {
+              const placeholderGroup = {
+                id: lTag,
+                name: `Group ${lTag.slice(0, 8)}`,
+                description: "",
+                picture: "",
+                members: [publicKey],
+                createdAt: Date.now(),
+              }
+              addGroup(placeholderGroup)
+              log("Created placeholder group:", lTag)
+            }
+
+            // Group message or reaction - store under group ID
+            log("Received group message for group:", lTag)
+            void usePrivateMessagesStore.getState().upsert(lTag, publicKey, event)
+            return
+          }
+
+          const pTag = getTag("p", event.tags)
+          if (!pTag) return
+
+          // Determine the chat ID - the "other party" in the conversation
+          // pubKey from SessionManager is already resolved to owner pubkey (not device identity)
+          // For outgoing messages, chatId is the recipient (pTag)
+          // For incoming messages, chatId is the sender's owner pubkey (pubKey)
+          const isFromUs = event.pubkey === publicKey
+          const chatId = isFromUs ? pTag : pubKey
+
+          void usePrivateMessagesStore.getState().upsert(chatId, publicKey, event)
         }
-
-        const pTag = getTag("p", event.tags)
-        if (!pTag) return
-
-        // Determine the chat ID - the "other party" in the conversation
-        // For outgoing messages (event.pubkey === us), chatId is the recipient (pTag)
-        // For incoming messages, chatId is the sender (event.pubkey)
-        const chatId = event.pubkey === publicKey ? pTag : event.pubkey
-
-        void usePrivateMessagesStore.getState().upsert(chatId, publicKey, event)
-      })
+      )
     })
     .catch((err) => {
       error("Failed to initialize session manager:", err)
