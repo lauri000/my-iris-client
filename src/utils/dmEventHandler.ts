@@ -99,7 +99,12 @@ export const attachSessionEventListener = async () => {
           // pubKey from SessionManager is already resolved to owner pubkey (not device identity)
           // For outgoing messages, chatId is the recipient (pTag)
           // For incoming messages, chatId is the sender's owner pubkey (pubKey)
-          const isFromUs = event.pubkey === publicKey
+          //
+          // isFromUs check:
+          // 1. event.pubkey matches our owner pubkey (direct match)
+          // 2. pubKey matches our owner pubkey (self-sync session - message from sibling device)
+          //    When syncing between our own devices, pubKey will be our owner pubkey
+          const isFromUs = event.pubkey === publicKey || pubKey === publicKey
           const chatId = isFromUs ? pTag : pubKey
 
           void usePrivateMessagesStore.getState().upsert(chatId, publicKey, event)

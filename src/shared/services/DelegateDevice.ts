@@ -57,10 +57,13 @@ const attachDelegateEventListener = (
     const pTag = getTag("p", event.tags)
     if (!pTag) return
 
-    // Check if message is from us: either owner's pubkey OR this delegate device's pubkey
+    // Check if message is from us:
+    // 1. event.pubkey matches owner or this delegate device's pubkey (direct match)
+    // 2. sessionPubkey matches owner pubkey (self-sync session - message from sibling device)
     const isFromUs =
       event.pubkey === ownerPublicKey ||
-      (delegatePubkey && event.pubkey === delegatePubkey)
+      (delegatePubkey && event.pubkey === delegatePubkey) ||
+      sessionPubkey === ownerPublicKey
 
     // Calculate chatId using the resolved owner pubkey from SessionManager
     // sessionPubkey is already resolved to owner pubkey (not device identity)
