@@ -18,8 +18,11 @@ interface DeviceInfo {
   id: string
   isCurrent: boolean
   createdAt: number
-  isRemoved?: boolean
-  removedAt?: number
+}
+
+const formatDeviceId = (id: string): string => {
+  if (id.length <= 12) return id
+  return `${id.slice(0, 8)}...${id.slice(-4)}`
 }
 
 interface DevicesTabProps {
@@ -30,7 +33,6 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const {publicKey} = useUserStore()
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [showRemoved, setShowRemoved] = useState(false)
   const [showPairingModal, setShowPairingModal] = useState(false)
   const [pairingCodeInput, setPairingCodeInput] = useState("")
   const [addingDevice, setAddingDevice] = useState(false)
@@ -56,7 +58,6 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     currentId: string | null
   ): DeviceInfo[] => {
     const activeDevices = inviteList.getAllDevices()
-    const removedDevices = inviteList.getRemovedDevices()
 
     const activeList: DeviceInfo[] = activeDevices.map((device: DeviceEntry) => ({
       id: device.identityPubkey,
@@ -64,22 +65,12 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
       createdAt: device.createdAt,
     }))
 
-    const removedList: DeviceInfo[] = removedDevices.map((removed) => ({
-      id: removed.identityPubkey,
-      isCurrent: removed.identityPubkey === currentId,
-      createdAt: 0,
-      isRemoved: true,
-      removedAt: removed.removedAt,
-    }))
-
     // Sort: current device first, then by createdAt descending
-    const sortedActive = activeList.sort((a, b) => {
+    return activeList.sort((a, b) => {
       if (a.isCurrent) return -1
       if (b.isCurrent) return 1
       return b.createdAt - a.createdAt
     })
-
-    return [...sortedActive, ...removedList]
   }
 
   // Check registration status on mount
@@ -222,17 +213,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     }
   }, [publicKey])
 
-  useEffect(() => {
-    if (!devices.some((device) => device.isRemoved && !device.isCurrent)) {
-      setShowRemoved(false)
-    }
-  }, [devices])
-
   const currentDevice = devices.find((device) => device.isCurrent)
-  const otherActiveDevices = devices.filter(
-    (device) => !device.isCurrent && !device.isRemoved
-  )
-  const removedDevices = devices.filter((device) => device.isRemoved && !device.isCurrent)
+  const otherActiveDevices = devices.filter((device) => !device.isCurrent)
 
   const handleDeleteDevice = async (identityPubkey: string) => {
     if (!(await confirm(`Revoke device ${identityPubkey.slice(0, 8)}?`))) {
@@ -309,7 +291,6 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
 
   const renderDeviceCard = (device: DeviceInfo) => {
     const deviceFoundDate = formatDeviceFoundDate(device.createdAt)
-    const removedDate = formatDeviceFoundDate(device.removedAt)
 
     return (
       <div key={device.id} className="card bg-base-100 shadow-sm border border-base-300">
@@ -321,20 +302,14 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                 {device.isCurrent && (
                   <span className="badge badge-primary badge-sm">Current</span>
                 )}
-                {device.isRemoved && (
-                  <span className="badge badge-warning badge-sm">Revoked</span>
-                )}
               </div>
-              {deviceFoundDate && !device.isRemoved && (
+              {deviceFoundDate && (
                 <div className="text-xs text-base-content/50">
                   Added {deviceFoundDate}
                 </div>
               )}
-              {device.isRemoved && removedDate && (
-                <div className="text-xs text-warning mt-1">Revoked {removedDate}</div>
-              )}
             </div>
-            {!device.isCurrent && !device.isRemoved && (
+            {!device.isCurrent && (
               <button
                 onClick={() => handleDeleteDevice(device.id)}
                 className="btn btn-ghost btn-sm text-error hover:bg-error/20"
@@ -417,17 +392,20 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
             <div className="text-xs font-semibold text-base-content/50 uppercase">
               Your existing devices ({existingDevices.length})
             </div>
-            {existingDevices.map((device: DeviceEntry) => (
+            {existingDevices.map((device: DeviceEntry, index: number) => (
               <div
                 key={device.identityPubkey}
-                className="card bg-base-100 shadow-sm border border-base-300"
+                className="flex items-center gap-3 p-3 bg-base-100 rounded-lg border border-base-300"
               >
-                <div className="card-body p-4">
-                  <span className="font-mono text-sm truncate">
-                    {device.identityPubkey}
-                  </span>
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-base-200 text-base-content/70 text-sm font-medium">
+                  {index + 1}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <code className="text-sm font-mono">
+                    {formatDeviceId(device.identityPubkey)}
+                  </code>
                   {device.createdAt && (
-                    <div className="text-xs text-base-content/50">
+                    <div className="text-xs text-base-content/50 mt-1">
                       Added {formatDeviceFoundDate(device.createdAt)}
                     </div>
                   )}
@@ -458,19 +436,31 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                 </p>
 
                 {/* Show devices that will be in the list */}
-                <div className="bg-base-200 rounded-lg p-3 my-2">
-                  <div className="text-xs font-semibold mb-2">
+                <div className="my-4">
+                  <div className="text-sm font-medium mb-3">
                     Devices after registration:
                   </div>
-                  <div className="space-y-1">
-                    {getDevicesToPublish().map((id) => (
-                      <div key={id} className="flex items-center gap-2">
-                        <span className="font-mono text-xs truncate">{id}</span>
-                        {id === currentDeviceId && (
-                          <span className="badge badge-primary badge-xs">
-                            This device
-                          </span>
-                        )}
+                  <div className="space-y-2">
+                    {getDevicesToPublish().map((id, index) => (
+                      <div
+                        key={id}
+                        className="flex items-center gap-3 p-3 bg-base-200 rounded-lg"
+                      >
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-base-300 text-base-content/70 text-sm font-medium">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <code className="text-sm font-mono">
+                              {formatDeviceId(id)}
+                            </code>
+                            {id === currentDeviceId && (
+                              <span className="badge badge-primary badge-sm">
+                                This device
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -547,31 +537,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
             </div>
           )}
 
-          {removedDevices.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowRemoved((prev) => !prev)}
-                className="flex items-center gap-2 text-xs text-base-content/50 hover:text-base-content/70 mb-2"
-              >
-                <span>{showRemoved ? "▼" : "▶"}</span>
-                <span>Revoked Devices ({removedDevices.length})</span>
-              </button>
-              {showRemoved && (
-                <div className="space-y-2 opacity-60">
-                  {removedDevices.map((device) => renderDeviceCard(device))}
-                </div>
-              )}
-            </div>
+          {!currentDevice && otherActiveDevices.length === 0 && (
+            <div className="text-center py-8 text-base-content/70">No devices found.</div>
           )}
-
-          {!currentDevice &&
-            otherActiveDevices.length === 0 &&
-            removedDevices.length === 0 && (
-              <div className="text-center py-8 text-base-content/70">
-                No devices found.
-              </div>
-            )}
         </div>
       )}
 
