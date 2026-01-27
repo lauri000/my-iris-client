@@ -137,6 +137,8 @@ const MessageForm = ({
           extraTags.length > 0
             ? await sessionManager.sendMessage(id, text, {tags: extraTags})
             : await sessionManager.sendMessage(id, text)
+        // Normalize pubkey to owner's pubkey for consistent display
+        sentMessage = {...sentMessage, pubkey: myPubKey}
       }
 
       await usePrivateMessagesStore.getState().upsert(id, myPubKey, sentMessage)

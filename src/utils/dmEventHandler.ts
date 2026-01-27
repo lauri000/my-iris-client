@@ -107,7 +107,11 @@ export const attachSessionEventListener = async () => {
           const isFromUs = event.pubkey === publicKey || pubKey === publicKey
           const chatId = isFromUs ? pTag : pubKey
 
-          void usePrivateMessagesStore.getState().upsert(chatId, publicKey, event)
+          // Normalize pubkey for messages from us so they display on correct side
+          const normalizedEvent = isFromUs ? {...event, pubkey: publicKey} : event
+          void usePrivateMessagesStore
+            .getState()
+            .upsert(chatId, publicKey, normalizedEvent)
         }
       )
     })

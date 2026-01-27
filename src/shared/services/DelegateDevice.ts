@@ -81,7 +81,11 @@ const attachDelegateEventListener = (
       pTag: pTag?.slice(0, 8),
     })
 
-    void usePrivateMessagesStore.getState().upsert(chatId, ownerPublicKey, event)
+    // Normalize pubkey for messages from us so they display on correct side
+    const normalizedEvent = isFromUs ? {...event, pubkey: ownerPublicKey} : event
+    void usePrivateMessagesStore
+      .getState()
+      .upsert(chatId, ownerPublicKey, normalizedEvent)
     log("[DelegateDevice] upsert called for chat:", chatId?.slice(0, 8))
   })
 }
