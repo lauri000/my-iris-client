@@ -2,7 +2,6 @@ import {DeviceManager} from "nostr-double-ratchet"
 import {LocalForageStorageAdapter} from "@/session/StorageAdapter"
 import {useUserStore} from "@/stores/user"
 import {ndk} from "@/utils/ndk"
-import {hexToBytes} from "nostr-tools/utils"
 import {
   createNostrPublish,
   createNostrSubscribe,
@@ -41,7 +40,7 @@ export const getDeviceManagerSync = (): DeviceManager => {
 }
 
 const initializeDeviceManager = async (): Promise<DeviceManager> => {
-  const {publicKey, privateKey} = useUserStore.getState()
+  const {publicKey} = useUserStore.getState()
 
   if (!publicKey) {
     throw new Error("No public key available")
@@ -50,27 +49,12 @@ const initializeDeviceManager = async (): Promise<DeviceManager> => {
   const ndkInstance = ndk()
   await waitForRelayConnection(ndkInstance)
 
-  // DeviceManager needs identityKey for signing InviteList
-  // For NIP-07, the signing happens via NDK's signer in nostrPublish
-  if (privateKey) {
-    deviceManagerInstance = new DeviceManager({
-      ownerPublicKey: publicKey,
-      identityKey: hexToBytes(privateKey),
-      nostrSubscribe: createNostrSubscribe(ndkInstance),
-      nostrPublish: createNostrPublish(ndkInstance),
-      storage: new LocalForageStorageAdapter(),
-    })
-  } else {
-    // NIP-07 login - signing happens via NDK signer
-    // Pass a dummy key since actual signing is done by nostrPublish
-    deviceManagerInstance = new DeviceManager({
-      ownerPublicKey: publicKey,
-      identityKey: new Uint8Array(32), // Placeholder - signing via NDK
-      nostrSubscribe: createNostrSubscribe(ndkInstance),
-      nostrPublish: createNostrPublish(ndkInstance),
-      storage: new LocalForageStorageAdapter(),
-    })
-  }
+  deviceManagerInstance = new DeviceManager({
+    ownerPublicKey: publicKey,
+    nostrSubscribe: createNostrSubscribe(ndkInstance),
+    nostrPublish: createNostrPublish(ndkInstance),
+    storage: new LocalForageStorageAdapter(),
+  })
 
   await deviceManagerInstance.init()
   log("DeviceManager initialized for:", publicKey.slice(0, 8))
