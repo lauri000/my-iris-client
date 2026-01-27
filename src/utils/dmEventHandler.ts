@@ -1,4 +1,4 @@
-import {getSessionManagerAsync} from "@/shared/services/PrivateChats"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
 import {isDelegateDevice} from "@/shared/services/DelegateDevice"
 import {useUserStore} from "@/stores/user"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
@@ -9,7 +9,7 @@ import {isTauri} from "./utils"
 import {getSocialGraph} from "./socialGraph"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
-import {Rumor} from "nostr-double-ratchet/src"
+import {Rumor} from "nostr-double-ratchet"
 
 const {log, error} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
@@ -26,7 +26,7 @@ export const attachSessionEventListener = () => {
     return
   }
 
-  getSessionManagerAsync()
+  getSessionManager()
     .then((sessionManager) => {
       unsubscribeSessionEvents?.()
       // Note: SessionManager now resolves delegate pubkeys to owner pubkeys internally

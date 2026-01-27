@@ -12,7 +12,7 @@ import {SettingsGroupItem} from "@/shared/components/settings/SettingsGroupItem"
 import {useWalletProviderStore} from "@/stores/walletProvider"
 import {SettingsButton} from "@/shared/components/settings/SettingsButton"
 import {confirm} from "@/utils/utils"
-import {revokeCurrentDevice} from "@/shared/services/PrivateChats"
+import {revokeCurrentDevice} from "@/shared/services/DeviceManagerService"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
 

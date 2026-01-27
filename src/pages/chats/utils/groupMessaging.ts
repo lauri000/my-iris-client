@@ -1,7 +1,7 @@
 import {getEventHash} from "nostr-tools"
-import {getSessionManagerAsync} from "@/shared/services/PrivateChats"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
-import {Rumor} from "nostr-double-ratchet/src"
+import {Rumor} from "nostr-double-ratchet"
 
 interface SendGroupEventOptions {
   groupId: string
@@ -39,7 +39,7 @@ export async function sendGroupEvent({
   await usePrivateMessagesStore.getState().upsert(groupId, senderPubKey, event)
 
   // Send to all group members in background
-  getSessionManagerAsync()
+  getSessionManager()
     .then((sessionManager) => {
       Promise.all(
         groupMembers.map((memberPubKey) => sessionManager.sendEvent(memberPubKey, event))

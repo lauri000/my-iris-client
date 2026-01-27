@@ -10,7 +10,7 @@ import {
   DelegatePayload,
   NostrPublish,
   NostrSubscribe,
-} from "nostr-double-ratchet/src"
+} from "nostr-double-ratchet"
 import {bytesToHex} from "@noble/hashes/utils"
 import {ndk} from "@/utils/ndk"
 import {VerifiedEvent} from "nostr-tools"

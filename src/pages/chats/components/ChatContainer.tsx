@@ -1,11 +1,11 @@
 import {useLayoutEffect, useRef, useState, useEffect, useMemo} from "react"
 import ErrorBoundary from "@/shared/components/ui/ErrorBoundary"
-import {getMillisecondTimestamp} from "nostr-double-ratchet/src"
+import {getMillisecondTimestamp} from "nostr-double-ratchet"
 import Message, {MessageType} from "../message/Message"
 import {groupMessages} from "../utils/messageGrouping"
 import {SortedMap} from "@/utils/SortedMap/SortedMap"
 import {useUserStore} from "@/stores/user"
-import {getSessionManagerAsync} from "@/shared/services/PrivateChats"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {KIND_REACTION} from "@/utils/constants"
 import {getEventHash} from "nostr-tools"
@@ -93,7 +93,7 @@ const ChatContainer = ({
       const myPubKey = useUserStore.getState().publicKey
       if (!myPubKey) return
 
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
 
       const now = Date.now()
       const reactionEvent = {

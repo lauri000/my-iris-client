@@ -6,7 +6,7 @@ import {SortedMap} from "@/utils/SortedMap/SortedMap"
 import {MessageType} from "../message/Message"
 import {useNavigate} from "@/navigation"
 import {useState} from "react"
-import {getSessionManagerAsync} from "@/shared/services/PrivateChats"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {confirm} from "@/utils/utils"
 interface PrivateChatHeaderProps {
@@ -23,7 +23,7 @@ const PrivateChatHeader = ({id}: PrivateChatHeaderProps) => {
     if (!(await confirm("Delete this chat?"))) return
 
     try {
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
       await sessionManager.deleteUser(id)
       await usePrivateMessagesStore.getState().removeSession(id)
       navigate("/chats")
@@ -36,7 +36,7 @@ const PrivateChatHeader = ({id}: PrivateChatHeaderProps) => {
     if (!id) return
 
     try {
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
       sessionManager.deactivateCurrentSessions(id)
       setDropdownOpen(false)
     } catch (error) {

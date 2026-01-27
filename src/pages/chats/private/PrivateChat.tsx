@@ -8,8 +8,8 @@ import {MessageType} from "../message/Message"
 import {useEffect, useState, useCallback} from "react"
 import {useUserStore} from "@/stores/user"
 import {KIND_REACTION} from "@/utils/constants"
-import {getSessionManagerAsync} from "@/shared/services/PrivateChats"
-import {getMillisecondTimestamp} from "nostr-double-ratchet/src"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
+import {getMillisecondTimestamp} from "nostr-double-ratchet"
 import {getEventHash} from "nostr-tools"
 import {useIsTopOfStack} from "@/navigation/useIsTopOfStack"
 
@@ -91,7 +91,7 @@ const Chat = ({id}: {id: string}) => {
     if (!myPubKey || !emoji.trim()) return
 
     try {
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
       const now = Date.now()
       const reactionEvent = {
         content: emoji,

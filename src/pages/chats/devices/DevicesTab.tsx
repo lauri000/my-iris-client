@@ -1,9 +1,10 @@
 import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
 import {RiDeleteBin6Line, RiAddLine} from "@remixicon/react"
-import {getSessionManagerAsync, getDeviceManager} from "@/shared/services/PrivateChats"
+import {getDeviceManager} from "@/shared/services/DeviceManagerService"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
 import {confirm, alert} from "@/utils/utils"
-import {DelegatePayload} from "nostr-double-ratchet/src"
+import {DelegatePayload} from "nostr-double-ratchet"
 
 interface DeviceInfo {
   id: string
@@ -12,7 +13,7 @@ interface DeviceInfo {
   staleAt?: number
 }
 
-type SessionManagerInstance = Awaited<ReturnType<typeof getSessionManagerAsync>>
+type SessionManagerInstance = Awaited<ReturnType<typeof getSessionManager>>
 
 const DevicesTab = () => {
   const {publicKey} = useUserStore()
@@ -71,7 +72,7 @@ const DevicesTab = () => {
       setLoading(true)
 
       try {
-        const manager = await getSessionManagerAsync()
+        const manager = await getSessionManager()
         await refreshDeviceList(manager)
       } catch (error) {
         console.error("Failed to load devices:", error)
@@ -105,10 +106,9 @@ const DevicesTab = () => {
 
     try {
       setLoading(true)
-      const deviceManager = getDeviceManager()
-      await deviceManager.init()
+      const deviceManager = await getDeviceManager()
       await deviceManager.revokeDevice(identityPubkey)
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
       await refreshDeviceList(sessionManager)
       setLoading(false)
     } catch (error) {
@@ -143,11 +143,10 @@ const DevicesTab = () => {
         return
       }
 
-      const deviceManager = getDeviceManager()
-      await deviceManager.init()
+      const deviceManager = await getDeviceManager()
       await deviceManager.addDevice(payload)
 
-      const sessionManager = await getSessionManagerAsync()
+      const sessionManager = await getSessionManager()
       await refreshDeviceList(sessionManager)
       handleClosePairingModal()
     } catch (error) {

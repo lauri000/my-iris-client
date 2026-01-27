@@ -9,7 +9,7 @@ import {useGroupsStore} from "@/stores/groups"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {SortedMap} from "@/utils/SortedMap/SortedMap"
 import {comparator} from "@/pages/chats/utils/messageGrouping"
-import {getMillisecondTimestamp} from "nostr-double-ratchet/src"
+import {getMillisecondTimestamp} from "nostr-double-ratchet"
 import {MessageType} from "@/pages/chats/message/Message"
 
 interface ChatListProps {

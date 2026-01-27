@@ -12,7 +12,7 @@ import {KIND_CONTACTS, DEBUG_NAMESPACES} from "@/utils/constants"
 import {unsubscribeAll} from "@/utils/notifications"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {useDraftStore} from "@/stores/draft"
-import {revokeCurrentDevice} from "@/shared/services/PrivateChats"
+import {revokeCurrentDevice} from "@/shared/services/DeviceManagerService"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 
 const {log, error} = createDebugLogger(DEBUG_NAMESPACES.UTILS)

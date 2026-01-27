@@ -2,11 +2,12 @@ import {
   INVITE_RESPONSE_KIND,
   MESSAGE_EVENT_KIND,
   SessionManager,
-} from "nostr-double-ratchet/src"
+} from "nostr-double-ratchet"
 import {useSettingsStore} from "@/stores/settings"
 import {SortedMap} from "./SortedMap/SortedMap"
 import {useUserStore} from "@/stores/user"
-import {getSessionManagerAsync, getDelegateManager} from "@/shared/services/PrivateChats"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
+import {getDelegateManager} from "@/shared/services/DelegateManagerService"
 import {NDKTag, NDKEvent} from "@/lib/ndk"
 import debounce from "lodash/debounce"
 import {base64} from "@scure/base"
@@ -168,7 +169,7 @@ export const subscribeToDMNotifications = debounce(async () => {
 
   let sessionAuthors: string[] = []
   try {
-    const sessionManager = await getSessionManagerAsync()
+    const sessionManager = await getSessionManager()
     const userRecords = sessionManager.getUserRecords()
     sessionAuthors = extractSessionPubkeysFromUserRecords(userRecords, publicKey)
     // Get invite from DelegateManager (device identity)
