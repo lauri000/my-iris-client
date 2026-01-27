@@ -107,7 +107,8 @@ const DevicesTab = () => {
     try {
       setLoading(true)
       const deviceManager = await getDeviceManager()
-      await deviceManager.revokeDevice(identityPubkey)
+      deviceManager.revokeDevice(identityPubkey)
+      await deviceManager.publish()
       const sessionManager = await getSessionManager()
       await refreshDeviceList(sessionManager)
       setLoading(false)
@@ -144,7 +145,8 @@ const DevicesTab = () => {
       }
 
       const deviceManager = await getDeviceManager()
-      await deviceManager.addDevice(payload)
+      deviceManager.addDevice(payload)
+      await deviceManager.publish()
 
       const sessionManager = await getSessionManager()
       await refreshDeviceList(sessionManager)

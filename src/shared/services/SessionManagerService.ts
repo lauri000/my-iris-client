@@ -67,7 +67,8 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
 
   if (!isDeviceInList) {
     // Add this device to InviteList (same as adding any delegate device)
-    await deviceManager.addDevice({identityPubkey: delegatePubkey})
+    deviceManager.addDevice({identityPubkey: delegatePubkey})
+    await deviceManager.publish()
     log("Added main device to InviteList:", delegatePubkey.slice(0, 8))
   }
 

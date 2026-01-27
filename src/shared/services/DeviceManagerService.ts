@@ -102,7 +102,8 @@ export const revokeCurrentDevice = async (): Promise<void> => {
   const delegateManager = await getDelegateManager()
   const identityPubkey = delegateManager.getIdentityPublicKey()
 
-  await deviceManager.revokeDevice(identityPubkey)
+  deviceManager.revokeDevice(identityPubkey)
+  await deviceManager.publish()
 }
 
 /**
