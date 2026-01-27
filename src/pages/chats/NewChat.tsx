@@ -3,7 +3,7 @@ import NotificationPrompt from "@/shared/components/NotificationPrompt"
 import {RiUserLine, RiTeamLine, RiEarthLine, RiComputerLine} from "@remixicon/react"
 import InstallPWAPrompt from "@/shared/components/InstallPWAPrompt"
 import PrivateChatCreation from "./private/PrivateChatCreation"
-import {Link, useLocation} from "@/navigation"
+import {Link, useLocation, useNavigate} from "@/navigation"
 import PublicChatCreation from "./public/PublicChatCreation"
 import GroupChatCreation from "./group/GroupChatCreation"
 import Header from "@/shared/components/header/Header"
@@ -49,6 +49,7 @@ const TabSelector = () => {
 
 const NewChat = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const [deviceRegistered, setDeviceRegistered] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -65,7 +66,12 @@ const NewChat = () => {
         <div className="pt-[calc(4rem+env(safe-area-inset-top))] pb-[calc(4rem+env(safe-area-inset-bottom))] md:pt-0 md:pb-0">
           <NotificationPrompt />
           {/* No TabSelector - just show DevicesTab */}
-          <DevicesTab onRegistered={() => setDeviceRegistered(true)} />
+          <DevicesTab
+            onRegistered={() => {
+              setDeviceRegistered(true)
+              navigate("/chats/new/devices")
+            }}
+          />
           <InstallPWAPrompt />
         </div>
       </>
