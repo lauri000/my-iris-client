@@ -1,5 +1,5 @@
 import NotificationPrompt from "@/shared/components/NotificationPrompt"
-import {RiUserLine, RiTeamLine, RiEarthLine} from "@remixicon/react"
+import {RiUserLine, RiTeamLine, RiEarthLine, RiComputerLine} from "@remixicon/react"
 import InstallPWAPrompt from "@/shared/components/InstallPWAPrompt"
 import PrivateChatCreation from "./private/PrivateChatCreation"
 import {Link, useLocation} from "@/navigation"
@@ -7,12 +7,13 @@ import PublicChatCreation from "./public/PublicChatCreation"
 import GroupChatCreation from "./group/GroupChatCreation"
 import Header from "@/shared/components/header/Header"
 import PublicChannelCreateStep from "./public/PublicChannelCreateStep"
-import Icon from "@/shared/components/Icons/Icon"
+import DevicesTab from "./devices/DevicesTab"
 
 const TabSelector = () => {
   const location = useLocation()
   const isPublic = location.pathname.startsWith("/chats/new/public")
   const isGroup = location.pathname.startsWith("/chats/new/group")
+  const isDevices = location.pathname.startsWith("/chats/new/devices")
 
   const getClasses = (isActive: boolean) => {
     const baseClasses =
@@ -24,7 +25,7 @@ const TabSelector = () => {
 
   return (
     <div className="flex mb-px md:mb-1">
-      <Link to="/chats/new" className={getClasses(!isPublic && !isGroup)}>
+      <Link to="/chats/new" className={getClasses(!isPublic && !isGroup && !isDevices)}>
         <RiUserLine className="mr-2 w-4 h-4" />
         Direct
       </Link>
@@ -35,6 +36,10 @@ const TabSelector = () => {
       <Link to="/chats/new/public" className={getClasses(isPublic)}>
         <RiEarthLine className="mr-2 w-4 h-4" />
         Public
+      </Link>
+      <Link to="/chats/new/devices" className={getClasses(isDevices)}>
+        <RiComputerLine className="mr-2 w-4 h-4" />
+        Devices
       </Link>
     </div>
   )
@@ -47,10 +52,12 @@ const NewChat = () => {
   let content = null
   if (location.pathname === "/chats/new/public/create") {
     content = <PublicChannelCreateStep />
-  } else if (location.pathname === "/chats/new/public") {
+  } else if (location.pathname.startsWith("/chats/new/public")) {
     content = <PublicChatCreation />
-  } else if (location.pathname === "/chats/new/group") {
+  } else if (location.pathname.startsWith("/chats/new/group")) {
     content = <GroupChatCreation />
+  } else if (location.pathname.startsWith("/chats/new/devices")) {
+    content = <DevicesTab />
   } else {
     // Default to private chat creation for /chats/new
     content = <PrivateChatCreation />
@@ -59,16 +66,7 @@ const NewChat = () => {
   return (
     <>
       <Header>
-        <div className="flex items-center justify-between w-full min-w-0">
-          <span className="truncate">New Chat</span>
-          <Link
-            to="/settings/chat"
-            className="btn btn-circle btn-ghost btn-sm flex-shrink-0 ml-2"
-            title="Chat Settings"
-          >
-            <Icon name="gear" className="w-5 h-5" />
-          </Link>
-        </div>
+        <span className="truncate">Private Messaging</span>
       </Header>
       <div className="pt-[calc(4rem+env(safe-area-inset-top))] pb-[calc(4rem+env(safe-area-inset-bottom))] md:pt-0 md:pb-0">
         <NotificationPrompt />
