@@ -52,13 +52,14 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
     throw new Error("No public key available")
   }
 
-  // 1. Initialize DeviceManager (InviteList authority)
-  const deviceManager = await getDeviceManager()
+  // 1. Initialize DeviceManager and DelegateManager in parallel
+  // DeviceManager = InviteList authority, DelegateManager = device identity
+  const [deviceManager, delegateManager] = await Promise.all([
+    getDeviceManager(),
+    getDelegateManager(),
+  ])
 
-  // 2. Initialize DelegateManager (device identity)
-  const delegateManager = await getDelegateManager()
-
-  // 3. Check if this device is registered in the InviteList
+  // 2. Check if this device is registered in the InviteList
   const devices = deviceManager.getOwnDevices()
   const delegatePubkey = delegateManager.getIdentityPublicKey()
   const isDeviceInList = devices.some(
@@ -73,11 +74,11 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
     )
   }
 
-  // 4. Activate directly - we know we're the owner, no need to fetch from relay
+  // 3. Activate directly - we know we're the owner, no need to fetch from relay
   // (For delegate devices on other machines, they use waitForActivation() instead)
   await delegateManager.activate(publicKey)
 
-  // 5. Create SessionManager from DelegateManager
+  // 4. Create SessionManager from DelegateManager
   sessionManagerInstance = delegateManager.createSessionManager()
   await sessionManagerInstance.init()
 

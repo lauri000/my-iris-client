@@ -2,11 +2,7 @@ import {DelegateManager} from "nostr-double-ratchet"
 import {LocalForageStorageAdapter} from "@/session/StorageAdapter"
 import {ndk} from "@/utils/ndk"
 import {hexToBytes, bytesToHex} from "nostr-tools/utils"
-import {
-  createNostrSubscribe,
-  createSigningPublish,
-  waitForRelayConnection,
-} from "./nostrHelpers"
+import {createNostrSubscribe, createSigningPublish} from "./nostrHelpers"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
 
@@ -50,11 +46,13 @@ export const getDelegateManagerSync = (): DelegateManager => {
 
 const initializeDelegateManager = async (): Promise<DelegateManager> => {
   const ndkInstance = ndk()
-  await waitForRelayConnection(ndkInstance)
+  // NDK handles queuing publishes/subscriptions until relays connect, no need to wait
 
-  // Check if we have stored delegate keys
-  const storedPubkey = await delegateStorage.get<string>(DELEGATE_PUBKEY_KEY)
-  const storedPrivkey = await delegateStorage.get<string>(DELEGATE_PRIVKEY_KEY)
+  // Check if we have stored delegate keys (read in parallel)
+  const [storedPubkey, storedPrivkey] = await Promise.all([
+    delegateStorage.get<string>(DELEGATE_PUBKEY_KEY),
+    delegateStorage.get<string>(DELEGATE_PRIVKEY_KEY),
+  ])
 
   if (storedPubkey && storedPrivkey) {
     // Restore existing delegate identity

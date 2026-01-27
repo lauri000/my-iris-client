@@ -2,7 +2,7 @@ import {DeviceManager} from "nostr-double-ratchet"
 import {LocalForageStorageAdapter} from "@/session/StorageAdapter"
 import {useUserStore} from "@/stores/user"
 import {ndk} from "@/utils/ndk"
-import {createNostrPublish, waitForRelayConnection} from "./nostrHelpers"
+import {createNostrPublish} from "./nostrHelpers"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
 
@@ -43,7 +43,7 @@ const initializeDeviceManager = async (): Promise<DeviceManager> => {
   }
 
   const ndkInstance = ndk()
-  await waitForRelayConnection(ndkInstance)
+  // NDK handles queuing publishes until relays connect, no need to wait
 
   deviceManagerInstance = new DeviceManager({
     nostrPublish: createNostrPublish(ndkInstance),
