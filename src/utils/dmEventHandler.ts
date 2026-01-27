@@ -1,6 +1,6 @@
 import {getSessionManager} from "@/shared/services/SessionManagerService"
-import {isDelegateDevice} from "@/shared/services/DelegateDevice"
 import {useUserStore} from "@/stores/user"
+import {useDelegateDeviceStore} from "@/stores/delegateDevice"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {useGroupsStore} from "@/stores/groups"
 import {getTag} from "./tagUtils"
@@ -20,25 +20,32 @@ export const cleanupSessionEventListener = () => {
 }
 
 export const attachSessionEventListener = async () => {
-  // Skip for delegate devices - they have their own listener in DelegateDevice.ts
-  if (isDelegateDevice()) {
-    log("Skipping main session listener for delegate device")
+  // For delegate devices, check if we have credentials but device is not yet activated
+  // In that case, skip - SessionManagerService will handle activation
+  const delegateCredentials = useDelegateDeviceStore.getState().credentials
+  if (delegateCredentials && !delegateCredentials.ownerPublicKey) {
+    log("Delegate device not yet activated, skipping session listener setup")
     return
   }
 
-  // Check if device is registered before trying to initialize SessionManager
-  const {isDeviceRegistered} = await import("@/shared/services/DeviceRegistrationService")
-  const registered = await isDeviceRegistered()
-  if (!registered) {
-    log("Device not registered, skipping session listener setup")
-    return
+  // For main devices, check if device is registered before trying to initialize
+  if (!delegateCredentials) {
+    const {isDeviceRegistered} =
+      await import("@/shared/services/DeviceRegistrationService")
+    const registered = await isDeviceRegistered()
+    if (!registered) {
+      log("Device not registered, skipping session listener setup")
+      return
+    }
   }
 
   getSessionManager()
     .then((sessionManager) => {
       unsubscribeSessionEvents?.()
-      // Note: SessionManager now resolves delegate pubkeys to owner pubkeys internally
-      // so pubKey is always the owner's pubkey, even for messages from delegate devices
+
+      // Get the delegate device pubkey for isFromUs check (if this is a delegate device)
+      const delegatePubkey = delegateCredentials?.devicePublicKey
+
       unsubscribeSessionEvents = sessionManager.onEvent(
         (event: Rumor, pubKey: string) => {
           const {publicKey} = useUserStore.getState()
@@ -100,11 +107,14 @@ export const attachSessionEventListener = async () => {
           // For outgoing messages, chatId is the recipient (pTag)
           // For incoming messages, chatId is the sender's owner pubkey (pubKey)
           //
-          // isFromUs check:
+          // isFromUs check (unified for main and delegate devices):
           // 1. event.pubkey matches our owner pubkey (direct match)
-          // 2. pubKey matches our owner pubkey (self-sync session - message from sibling device)
-          //    When syncing between our own devices, pubKey will be our owner pubkey
-          const isFromUs = event.pubkey === publicKey || pubKey === publicKey
+          // 2. event.pubkey matches our delegate device pubkey (sent from this device)
+          // 3. pubKey matches our owner pubkey (self-sync session - message from sibling device)
+          const isFromUs =
+            event.pubkey === publicKey ||
+            (delegatePubkey && event.pubkey === delegatePubkey) ||
+            pubKey === publicKey
           const chatId = isFromUs ? pTag : pubKey
 
           // Normalize pubkey for messages from us so they display on correct side

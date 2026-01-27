@@ -5,6 +5,11 @@ import {hexToBytes, bytesToHex} from "nostr-tools/utils"
 import {createNostrSubscribe, createSigningPublish} from "./nostrHelpers"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
+import {
+  useDelegateDeviceStore,
+  getDevicePrivateKeyBytes,
+  DelegateDeviceCredentials,
+} from "@/stores/delegateDevice"
 
 const {log} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
@@ -44,9 +49,39 @@ export const getDelegateManagerSync = (): DelegateManager => {
   return delegateManagerInstance
 }
 
-const initializeDelegateManager = async (): Promise<DelegateManager> => {
+/**
+ * Restore DelegateManager from paired delegate device credentials.
+ * Used when this is a delegate device that was paired via QR code.
+ */
+const restoreFromDelegateCredentials = async (
+  credentials: DelegateDeviceCredentials
+): Promise<DelegateManager> => {
   const ndkInstance = ndk()
-  // NDK handles queuing publishes/subscriptions until relays connect, no need to wait
+  const devicePrivateKey = getDevicePrivateKeyBytes(credentials)
+  const delegatePublish = await createSigningPublish(ndkInstance, devicePrivateKey)
+
+  delegateManagerInstance = DelegateManager.restore({
+    devicePublicKey: credentials.devicePublicKey,
+    devicePrivateKey,
+    nostrSubscribe: createNostrSubscribe(ndkInstance),
+    nostrPublish: delegatePublish,
+    storage: new LocalForageStorageAdapter(),
+  })
+
+  log(
+    "Restored delegate identity from pairing credentials:",
+    credentials.devicePublicKey.slice(0, 8)
+  )
+  await delegateManagerInstance.init()
+  return delegateManagerInstance
+}
+
+/**
+ * Create or restore DelegateManager from IndexedDB storage.
+ * Used for main devices (nsec login).
+ */
+const createOrRestoreFromStorage = async (): Promise<DelegateManager> => {
+  const ndkInstance = ndk()
 
   // Check if we have stored delegate keys (read in parallel)
   const [storedPubkey, storedPrivkey] = await Promise.all([
@@ -67,7 +102,7 @@ const initializeDelegateManager = async (): Promise<DelegateManager> => {
       storage: new LocalForageStorageAdapter(),
     })
 
-    log("Restored delegate identity:", storedPubkey.slice(0, 8))
+    log("Restored delegate identity from storage:", storedPubkey.slice(0, 8))
   } else {
     // Create new delegate identity
     const {manager, payload} = DelegateManager.create({
@@ -103,6 +138,19 @@ const initializeDelegateManager = async (): Promise<DelegateManager> => {
 
   await delegateManagerInstance.init()
   return delegateManagerInstance
+}
+
+const initializeDelegateManager = async (): Promise<DelegateManager> => {
+  // Check if this is a paired delegate device (QR code flow)
+  const delegateCredentials = useDelegateDeviceStore.getState().credentials
+
+  if (delegateCredentials) {
+    // Delegate device flow - restore from pairing credentials
+    return restoreFromDelegateCredentials(delegateCredentials)
+  }
+
+  // Main device flow - create/restore from IndexedDB
+  return createOrRestoreFromStorage()
 }
 
 /**

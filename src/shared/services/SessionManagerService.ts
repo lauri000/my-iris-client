@@ -1,5 +1,6 @@
 import {SessionManager} from "nostr-double-ratchet"
 import {useUserStore} from "@/stores/user"
+import {useDelegateDeviceStore} from "@/stores/delegateDevice"
 import {getDeviceManager} from "./DeviceManagerService"
 import {getDelegateManager} from "./DelegateManagerService"
 import {createDebugLogger} from "@/utils/createDebugLogger"
@@ -37,29 +38,59 @@ export const getSessionManagerSync = (): SessionManager => {
 }
 
 /**
- * Initialize all managers and create SessionManager.
- * Uses the same flow as delegate devices:
- * 1. DeviceManager handles InviteList (authority)
- * 2. DelegateManager handles device identity (same as any device)
- * 3. Add device to InviteList if not already there
- * 4. Activate the device
- * 5. Create SessionManager from DelegateManager
+ * Initialize SessionManager for a delegate device (QR code paired).
+ * Handles activation (waiting if needed) and creates SessionManager.
  */
-const initializeSessionManager = async (): Promise<SessionManager> => {
+const initializeForDelegateDevice = async (): Promise<SessionManager> => {
+  const credentials = useDelegateDeviceStore.getState().credentials
+  if (!credentials) {
+    throw new Error("No delegate device credentials")
+  }
+
+  const delegateManager = await getDelegateManager()
+
+  // Activate - either immediately if we know owner, or wait for activation
+  if (credentials.ownerPublicKey) {
+    // Already activated - just activate the manager
+    await delegateManager.activate(credentials.ownerPublicKey)
+    log("Delegate device activated for owner:", credentials.ownerPublicKey.slice(0, 8))
+  } else {
+    // Need to wait for activation from owner
+    log("Waiting for delegate device activation...")
+    const ownerKey = await delegateManager.waitForActivation(60000)
+    useDelegateDeviceStore.getState().setOwnerPublicKey(ownerKey)
+    useDelegateDeviceStore.getState().setActivated(true)
+    log("Delegate device activated by owner:", ownerKey.slice(0, 8))
+  }
+
+  // Create SessionManager from DelegateManager
+  sessionManagerInstance = delegateManager.createSessionManager()
+  await sessionManagerInstance.init()
+
+  const ownerKey = credentials.ownerPublicKey || delegateManager.getOwnerPublicKey()
+  log("SessionManager initialized for delegate device, owner:", ownerKey?.slice(0, 8))
+  return sessionManagerInstance
+}
+
+/**
+ * Initialize SessionManager for a main device (nsec login).
+ * Checks InviteList registration and activates directly.
+ */
+const initializeForMainDevice = async (): Promise<SessionManager> => {
   const {publicKey} = useUserStore.getState()
 
   if (!publicKey) {
     throw new Error("No public key available")
   }
 
-  // 1. Initialize DeviceManager and DelegateManager in parallel
+  // Initialize DeviceManager and DelegateManager in parallel
   // DeviceManager = InviteList authority, DelegateManager = device identity
   const [deviceManager, delegateManager] = await Promise.all([
     getDeviceManager(),
     getDelegateManager(),
   ])
 
-  // 2. Check if this device is registered in the InviteList
+  // Check if this device is registered in the InviteList
   const devices = deviceManager.getOwnDevices()
   const delegatePubkey = delegateManager.getIdentityPublicKey()
   const isDeviceInList = devices.some(
@@ -74,16 +105,30 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
     )
   }
 
-  // 3. Activate directly - we know we're the owner, no need to fetch from relay
-  // (For delegate devices on other machines, they use waitForActivation() instead)
+  // Activate directly - we know we're the owner, no need to fetch from relay
   await delegateManager.activate(publicKey)
 
-  // 4. Create SessionManager from DelegateManager
+  // Create SessionManager from DelegateManager
   sessionManagerInstance = delegateManager.createSessionManager()
   await sessionManagerInstance.init()
 
-  log("SessionManager initialized for:", publicKey.slice(0, 8))
+  log("SessionManager initialized for main device:", publicKey.slice(0, 8))
   return sessionManagerInstance
+}
+
+/**
+ * Initialize all managers and create SessionManager.
+ * Handles both main devices (nsec login) and delegate devices (QR paired).
+ */
+const initializeSessionManager = async (): Promise<SessionManager> => {
+  // Check if this is a delegate device (QR code paired)
+  const credentials = useDelegateDeviceStore.getState().credentials
+
+  if (credentials) {
+    return initializeForDelegateDevice()
+  }
+
+  return initializeForMainDevice()
 }
 
 /**

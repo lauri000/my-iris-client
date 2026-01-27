@@ -10,10 +10,9 @@ import {useUserStore} from "@/stores/user"
 
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
-import {
-  initializeDelegateDevice,
-  resumeDelegateDevice,
-} from "@/shared/services/DelegateDevice"
+import {initializeDelegateDevice} from "@/shared/services/DelegateDevice"
+import {getSessionManager} from "@/shared/services/SessionManagerService"
+import {attachSessionEventListener} from "@/utils/dmEventHandler"
 
 const {log, error} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
@@ -40,12 +39,16 @@ export function DelegateChatApp() {
       }
       initializingRef.current = true
 
-      // Resume delegate device - initializes SessionManager and attaches event listeners
+      // Resume delegate device - uses unified SessionManager initialization
       log("Resuming delegate device...")
-      resumeDelegateDevice(ownerPublicKey)
+      useUserStore.getState().setPublicKey(ownerPublicKey)
+      getSessionManager()
+        .then(() => {
+          log("SessionManager initialized for delegate device")
+          return attachSessionEventListener()
+        })
         .then(() => {
           log("Delegate device resumed")
-          useUserStore.getState().setPublicKey(ownerPublicKey)
           setAppState("ready")
         })
         .catch((err: Error) => {

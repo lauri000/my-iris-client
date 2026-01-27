@@ -16,7 +16,6 @@ import Icon from "@/shared/components/Icons/Icon"
 import EmojiType from "@/types/emoji"
 import {MessageType} from "./Message"
 import {getSessionManager} from "@/shared/services/SessionManagerService"
-import {isDelegateDevice, sendDelegateMessage} from "@/shared/services/DelegateDevice"
 import {usePrivateMessagesStore} from "@/stores/privateMessages"
 import {useUserStore} from "@/stores/user"
 import {sendGroupEvent} from "../utils/groupMessaging"
@@ -121,25 +120,16 @@ const MessageForm = ({
         return
       }
 
-      // DM messages
-      let sentMessage
-      if (isDelegateDevice()) {
-        // Delegate device - use DelegateDevice service
-        sentMessage = await sendDelegateMessage(id, text)
-        // Normalize pubkey to owner's pubkey for consistent display across devices
-        // The actual message on the wire uses delegate's pubkey for crypto, but for
-        // local storage and sync we use owner's pubkey so all devices recognize it as "ours"
-        sentMessage = {...sentMessage, pubkey: myPubKey}
-      } else {
-        // Main device - use SessionManager
-        const sessionManager = await getSessionManager()
-        sentMessage =
-          extraTags.length > 0
-            ? await sessionManager.sendMessage(id, text, {tags: extraTags})
-            : await sessionManager.sendMessage(id, text)
-        // Normalize pubkey to owner's pubkey for consistent display
-        sentMessage = {...sentMessage, pubkey: myPubKey}
-      }
+      // DM messages - unified send path for all device types
+      const sessionManager = await getSessionManager()
+      let sentMessage =
+        extraTags.length > 0
+          ? await sessionManager.sendMessage(id, text, {tags: extraTags})
+          : await sessionManager.sendMessage(id, text)
+      // Normalize pubkey to owner's pubkey for consistent display across devices
+      // The actual message on the wire uses device's pubkey for crypto, but for
+      // local storage we use owner's pubkey so all devices recognize it as "ours"
+      sentMessage = {...sentMessage, pubkey: myPubKey}
 
       await usePrivateMessagesStore.getState().upsert(id, myPubKey, sentMessage)
       setEncryptionMetadata(new Map())
@@ -215,8 +205,9 @@ const MessageForm = ({
         return
       }
 
-      // DM messages
-      const sentMessage = await sessionManager.sendMessage(id, token)
+      // DM messages - normalize pubkey for consistent display
+      let sentMessage = await sessionManager.sendMessage(id, token)
+      sentMessage = {...sentMessage, pubkey: myPubKey}
       await usePrivateMessagesStore.getState().upsert(id, myPubKey, sentMessage)
     } catch (error) {
       console.error("Failed to send cashu token:", error)
