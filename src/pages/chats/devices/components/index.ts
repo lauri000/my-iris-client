@@ -1,5 +1,0 @@
-export {default as DeviceCard} from "./DeviceCard"
-export {default as DeviceList} from "./DeviceList"
-export {default as RegistrationPrompt} from "./RegistrationPrompt"
-export {default as RegistrationConfirmModal} from "./RegistrationConfirmModal"
-export {default as PairingModal} from "./PairingModal"
