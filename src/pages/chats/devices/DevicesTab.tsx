@@ -2,24 +2,25 @@ import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
 import {RiDeleteBin6Line, RiAddLine} from "@remixicon/react"
 import {getDeviceManager} from "@/shared/services/DeviceManagerService"
-import {getSessionManager} from "@/shared/services/SessionManagerService"
+import {getDelegateManager} from "@/shared/services/DelegateManagerService"
+import {createNostrSubscribe} from "@/shared/services/nostrHelpers"
+import {ndk} from "@/utils/ndk"
 import {confirm, alert} from "@/utils/utils"
-import {DelegatePayload} from "nostr-double-ratchet"
+import {DelegatePayload, InviteList, DeviceEntry} from "nostr-double-ratchet"
 
 interface DeviceInfo {
   id: string
   isCurrent: boolean
   createdAt: number
-  staleAt?: number
+  isRemoved?: boolean
+  removedAt?: number
 }
-
-type SessionManagerInstance = Awaited<ReturnType<typeof getSessionManager>>
 
 const DevicesTab = () => {
   const {publicKey} = useUserStore()
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [showStale, setShowStale] = useState(false)
+  const [showRemoved, setShowRemoved] = useState(false)
   const [showPairingModal, setShowPairingModal] = useState(false)
   const [pairingCodeInput, setPairingCodeInput] = useState("")
   const [addingDevice, setAddingDevice] = useState(false)
@@ -31,76 +32,102 @@ const DevicesTab = () => {
     return new Date(normalized).toLocaleString()
   }
 
-  const buildDeviceList = (manager: SessionManagerInstance): DeviceInfo[] => {
-    if (!publicKey) return []
+  const buildDeviceList = (
+    inviteList: InviteList,
+    currentId: string | null
+  ): DeviceInfo[] => {
+    const activeDevices = inviteList.getAllDevices()
+    const removedDevices = inviteList.getRemovedDevices()
 
-    const currentDeviceId = manager.getDeviceId()
-    const userRecord = manager.getUserRecords().get(publicKey)
+    const activeList: DeviceInfo[] = activeDevices.map((device: DeviceEntry) => ({
+      id: device.identityPubkey,
+      isCurrent: device.identityPubkey === currentId,
+      createdAt: device.createdAt,
+    }))
 
-    if (!userRecord) return []
+    const removedList: DeviceInfo[] = removedDevices.map((removed) => ({
+      id: removed.identityPubkey,
+      isCurrent: removed.identityPubkey === currentId,
+      createdAt: 0,
+      isRemoved: true,
+      removedAt: removed.removedAt,
+    }))
 
-    const currentDevice = userRecord.devices.get(currentDeviceId)
-    const otherDevices = Array.from(userRecord.devices.entries()).filter(
-      ([deviceId]) => deviceId !== currentDeviceId
-    )
+    // Sort: current device first, then by createdAt descending
+    const sortedActive = activeList.sort((a, b) => {
+      if (a.isCurrent) return -1
+      if (b.isCurrent) return 1
+      return b.createdAt - a.createdAt
+    })
 
-    const deviceList = [currentDevice, ...otherDevices.map(([, d]) => d)]
-      .filter((device) => device !== undefined)
-      .map((device) => ({
-        id: device.deviceId,
-        isCurrent: device.deviceId === currentDeviceId,
-        createdAt: device.createdAt,
-        staleAt: device.staleAt,
-      }))
-
-    return deviceList
-  }
-
-  const refreshDeviceList = async (manager: SessionManagerInstance) => {
-    const list = buildDeviceList(manager)
-    setDevices(list)
+    return [...sortedActive, ...removedList]
   }
 
   useEffect(() => {
-    const loadDeviceInfo = async () => {
-      if (!publicKey) {
-        setDevices([])
-        setLoading(false)
-        return
-      }
+    if (!publicKey) {
+      setDevices([])
+      setLoading(false)
+      return
+    }
 
+    let unsubscribe: (() => void) | null = null
+
+    const setup = async () => {
       setLoading(true)
 
       try {
-        const manager = await getSessionManager()
-        await refreshDeviceList(manager)
+        // Get current device identity
+        const delegateManager = await getDelegateManager()
+        const deviceId = delegateManager.getIdentityPublicKey()
+
+        // Also load from local DeviceManager for immediate display
+        const deviceManager = await getDeviceManager()
+        const localList = deviceManager.getInviteList()
+        if (localList) {
+          setDevices(buildDeviceList(localList, deviceId))
+        }
+
+        // Subscribe to InviteList from relays
+        const ndkInstance = ndk()
+        const subscribe = createNostrSubscribe(ndkInstance)
+
+        unsubscribe = InviteList.fromUser(publicKey, subscribe, (inviteList) => {
+          setDevices(buildDeviceList(inviteList, deviceId))
+          setLoading(false)
+        })
+
+        // Set loading to false after a short timeout if no events received
+        setTimeout(() => setLoading(false), 2000)
       } catch (error) {
         console.error("Failed to load devices:", error)
         setDevices([])
-      } finally {
         setLoading(false)
       }
     }
 
-    loadDeviceInfo()
+    setup()
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe()
+      }
+    }
   }, [publicKey])
 
   useEffect(() => {
-    if (!devices.some((device) => device.staleAt !== undefined && !device.isCurrent)) {
-      setShowStale(false)
+    if (!devices.some((device) => device.isRemoved && !device.isCurrent)) {
+      setShowRemoved(false)
     }
   }, [devices])
 
   const currentDevice = devices.find((device) => device.isCurrent)
   const otherActiveDevices = devices.filter(
-    (device) => !device.isCurrent && device.staleAt === undefined
+    (device) => !device.isCurrent && !device.isRemoved
   )
-  const staleDevices = devices.filter(
-    (device) => device.staleAt !== undefined && !device.isCurrent
-  )
+  const removedDevices = devices.filter((device) => device.isRemoved && !device.isCurrent)
 
   const handleDeleteDevice = async (identityPubkey: string) => {
-    if (!(await confirm(`Delete invite for device ${identityPubkey.slice(0, 8)}?`))) {
+    if (!(await confirm(`Revoke device ${identityPubkey.slice(0, 8)}?`))) {
       return
     }
 
@@ -109,12 +136,11 @@ const DevicesTab = () => {
       const deviceManager = await getDeviceManager()
       deviceManager.revokeDevice(identityPubkey)
       await deviceManager.publish()
-      const sessionManager = await getSessionManager()
-      await refreshDeviceList(sessionManager)
+      // List will update via subscription
       setLoading(false)
     } catch (error) {
-      console.error("Failed to delete invite:", error)
-      await alert("Failed to delete invite")
+      console.error("Failed to revoke device:", error)
+      await alert("Failed to revoke device")
       setLoading(false)
     }
   }
@@ -147,9 +173,7 @@ const DevicesTab = () => {
       const deviceManager = await getDeviceManager()
       deviceManager.addDevice(payload)
       await deviceManager.publish()
-
-      const sessionManager = await getSessionManager()
-      await refreshDeviceList(sessionManager)
+      // List will update via subscription
       handleClosePairingModal()
     } catch (error) {
       console.error("Failed to add delegate device:", error)
@@ -177,8 +201,7 @@ const DevicesTab = () => {
 
   const renderDeviceCard = (device: DeviceInfo) => {
     const deviceFoundDate = formatDeviceFoundDate(device.createdAt)
-    const staleSinceDate = formatDeviceFoundDate(device.staleAt)
-    const isStale = device.staleAt !== undefined
+    const removedDate = formatDeviceFoundDate(device.removedAt)
 
     return (
       <div key={device.id} className="card bg-base-100 shadow-sm border border-base-300">
@@ -190,18 +213,20 @@ const DevicesTab = () => {
                 {device.isCurrent && (
                   <span className="badge badge-primary badge-sm">Current</span>
                 )}
-                {isStale && <span className="badge badge-warning badge-sm">Stale</span>}
+                {device.isRemoved && (
+                  <span className="badge badge-warning badge-sm">Revoked</span>
+                )}
               </div>
-              {deviceFoundDate && (
+              {deviceFoundDate && !device.isRemoved && (
                 <div className="text-xs text-base-content/50">
                   Added {deviceFoundDate}
                 </div>
               )}
-              {isStale && staleSinceDate && (
-                <div className="text-xs text-warning mt-1">Revoked {staleSinceDate}</div>
+              {device.isRemoved && removedDate && (
+                <div className="text-xs text-warning mt-1">Revoked {removedDate}</div>
               )}
             </div>
-            {!device.isCurrent && !isStale && (
+            {!device.isCurrent && !device.isRemoved && (
               <button
                 onClick={() => handleDeleteDevice(device.id)}
                 className="btn btn-ghost btn-sm text-error hover:bg-error/20"
@@ -258,19 +283,19 @@ const DevicesTab = () => {
             </div>
           )}
 
-          {staleDevices.length > 0 && (
+          {removedDevices.length > 0 && (
             <div>
               <button
                 type="button"
-                onClick={() => setShowStale((prev) => !prev)}
+                onClick={() => setShowRemoved((prev) => !prev)}
                 className="flex items-center gap-2 text-xs text-base-content/50 hover:text-base-content/70 mb-2"
               >
-                <span>{showStale ? "▼" : "▶"}</span>
-                <span>Revoked Devices ({staleDevices.length})</span>
+                <span>{showRemoved ? "▼" : "▶"}</span>
+                <span>Revoked Devices ({removedDevices.length})</span>
               </button>
-              {showStale && (
+              {showRemoved && (
                 <div className="space-y-2 opacity-60">
-                  {staleDevices.map((device) => renderDeviceCard(device))}
+                  {removedDevices.map((device) => renderDeviceCard(device))}
                 </div>
               )}
             </div>
@@ -278,7 +303,7 @@ const DevicesTab = () => {
 
           {!currentDevice &&
             otherActiveDevices.length === 0 &&
-            staleDevices.length === 0 && (
+            removedDevices.length === 0 && (
               <div className="text-center py-8 text-base-content/70">
                 No devices found.
               </div>
