@@ -41,6 +41,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const [isRegistering, setIsRegistering] = useState(false)
   const [remoteInviteList, setRemoteInviteList] = useState<InviteList | null>(null)
   const [loadingRemoteList, setLoadingRemoteList] = useState(true)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [pendingAction, setPendingAction] = useState<"start" | "add" | null>(null)
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null)
 
   const formatDeviceFoundDate = (timestamp?: number) => {
     if (!timestamp) return null
@@ -88,6 +91,11 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     isDeviceRegistered().then(setIsCurrentDeviceRegistered)
   }, [publicKey])
 
+  // Fetch current device ID on mount
+  useEffect(() => {
+    getDelegateManager().then((dm) => setCurrentDeviceId(dm.getIdentityPublicKey()))
+  }, [])
+
   // Fetch remote InviteList when device is not registered
   useEffect(() => {
     if (!publicKey || isCurrentDeviceRegistered !== false) {
@@ -113,10 +121,26 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     }
   }, [publicKey, isCurrentDeviceRegistered])
 
-  const handleStartPrivateMessaging = async () => {
+  const handleStartPrivateMessaging = () => {
+    setPendingAction("start")
+    setShowConfirmModal(true)
+  }
+
+  const handleAddThisDevice = () => {
+    if (!remoteInviteList) return
+    setPendingAction("add")
+    setShowConfirmModal(true)
+  }
+
+  const handleConfirmPublish = async () => {
+    setShowConfirmModal(false)
     setIsRegistering(true)
     try {
-      await registerCurrentDevice()
+      if (pendingAction === "start") {
+        await registerCurrentDevice()
+      } else if (pendingAction === "add" && remoteInviteList) {
+        await addDeviceToExistingList(remoteInviteList)
+      }
       setIsCurrentDeviceRegistered(true)
       onRegistered?.()
       // Initialize the session listener now that device is registered
@@ -126,24 +150,25 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
       await alert("Failed to register device")
     } finally {
       setIsRegistering(false)
+      setPendingAction(null)
     }
   }
 
-  const handleAddThisDevice = async () => {
-    if (!remoteInviteList) return
-    setIsRegistering(true)
-    try {
-      await addDeviceToExistingList(remoteInviteList)
-      setIsCurrentDeviceRegistered(true)
-      onRegistered?.()
-      // Initialize the session listener now that device is registered
-      await attachSessionEventListener()
-    } catch (err) {
-      console.error("Failed to add device:", err)
-      await alert("Failed to add device")
-    } finally {
-      setIsRegistering(false)
+  const getDevicesToPublish = (): string[] => {
+    if (pendingAction === "start") {
+      // For start: just this device
+      return currentDeviceId ? [currentDeviceId] : []
+    } else if (pendingAction === "add" && remoteInviteList) {
+      // For add: existing devices + this device
+      const existingIds = remoteInviteList
+        .getAllDevices()
+        .map((d: DeviceEntry) => d.identityPubkey)
+      if (currentDeviceId && !existingIds.includes(currentDeviceId)) {
+        return [...existingIds, currentDeviceId]
+      }
+      return existingIds
     }
+    return []
   }
 
   useEffect(() => {
@@ -416,6 +441,64 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         {!loadingRemoteList && !hasExistingDevices && (
           <div className="text-center text-base-content/50 text-sm">
             No existing devices found. Click &quot;Start secure messaging&quot; to begin.
+          </div>
+        )}
+
+        {/* Confirmation modal */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="card w-full max-w-md bg-base-100 shadow-xl m-4">
+              <div className="card-body">
+                <h2 className="card-title">Confirm Device Registration</h2>
+
+                <p className="text-base-content/70 text-sm">
+                  {pendingAction === "start"
+                    ? "You're about to register this device for secure messaging."
+                    : "You're about to add this device to your existing device list."}
+                </p>
+
+                {/* Show devices that will be in the list */}
+                <div className="bg-base-200 rounded-lg p-3 my-2">
+                  <div className="text-xs font-semibold mb-2">
+                    Devices after registration:
+                  </div>
+                  <div className="space-y-1">
+                    {getDevicesToPublish().map((id) => (
+                      <div key={id} className="flex items-center gap-2">
+                        <span className="font-mono text-xs truncate">{id}</span>
+                        {id === currentDeviceId && (
+                          <span className="badge badge-primary badge-xs">
+                            This device
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Warning */}
+                <div className="alert alert-warning">
+                  <span className="text-sm">
+                    Any devices not in this list will no longer receive your messages.
+                  </span>
+                </div>
+
+                <div className="card-actions justify-end mt-4">
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setShowConfirmModal(false)
+                      setPendingAction(null)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" onClick={handleConfirmPublish}>
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
