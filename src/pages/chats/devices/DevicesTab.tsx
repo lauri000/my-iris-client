@@ -22,7 +22,11 @@ interface DeviceInfo {
   removedAt?: number
 }
 
-const DevicesTab = () => {
+interface DevicesTabProps {
+  onRegistered?: () => void
+}
+
+const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const {publicKey} = useUserStore()
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -114,6 +118,7 @@ const DevicesTab = () => {
     try {
       await registerCurrentDevice()
       setIsCurrentDeviceRegistered(true)
+      onRegistered?.()
       // Initialize the session listener now that device is registered
       await attachSessionEventListener()
     } catch (err) {
@@ -130,6 +135,7 @@ const DevicesTab = () => {
     try {
       await addDeviceToExistingList(remoteInviteList)
       setIsCurrentDeviceRegistered(true)
+      onRegistered?.()
       // Initialize the session listener now that device is registered
       await attachSessionEventListener()
     } catch (err) {
@@ -322,9 +328,21 @@ const DevicesTab = () => {
   if (isCurrentDeviceRegistered === false) {
     const hasExistingDevices =
       remoteInviteList && remoteInviteList.getAllDevices().length > 0
+    const existingDevices = remoteInviteList?.getAllDevices() || []
 
     return (
-      <div className="p-4">
+      <div className="p-4 space-y-4">
+        {/* Search status - always visible while loading */}
+        {loadingRemoteList && (
+          <div className="flex items-center justify-center gap-3 p-4 bg-base-200 rounded-lg">
+            <span className="loading loading-spinner loading-sm" />
+            <span className="text-base-content/70">
+              Searching for existing devices on relays...
+            </span>
+          </div>
+        )}
+
+        {/* Main registration card */}
         <div className="card bg-base-100 border border-primary/30">
           <div className="card-body">
             <div className="flex items-center gap-3 mb-2">
@@ -336,7 +354,9 @@ const DevicesTab = () => {
             <p className="text-base-content/70">
               Register this device to send and receive encrypted direct messages.
             </p>
+
             <div className="card-actions justify-end mt-4 gap-2">
+              {/* Always show "Start secure messaging" */}
               <button
                 className="btn btn-primary"
                 onClick={handleStartPrivateMessaging}
@@ -348,31 +368,56 @@ const DevicesTab = () => {
                     Registering...
                   </>
                 ) : (
-                  "Start using private messaging"
+                  "Start secure messaging"
                 )}
               </button>
-              <button
-                className="btn btn-outline"
-                onClick={handleAddThisDevice}
-                disabled={isRegistering || loadingRemoteList || !hasExistingDevices}
-              >
-                {loadingRemoteList ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm" />
-                    Checking...
-                  </>
-                ) : (
-                  "Add this device"
-                )}
-              </button>
+
+              {/* Only show "Add this device" when existing devices found */}
+              {hasExistingDevices && (
+                <button
+                  className="btn btn-outline"
+                  onClick={handleAddThisDevice}
+                  disabled={isRegistering}
+                >
+                  Add this device
+                </button>
+              )}
             </div>
-            {!loadingRemoteList && !hasExistingDevices && (
-              <p className="text-xs text-base-content/50 mt-2 text-right">
-                No existing devices found. Start fresh with the button above.
-              </p>
-            )}
           </div>
         </div>
+
+        {/* Show existing devices when found */}
+        {hasExistingDevices && (
+          <div className="space-y-3">
+            <div className="text-xs font-semibold text-base-content/50 uppercase">
+              Your existing devices ({existingDevices.length})
+            </div>
+            {existingDevices.map((device: DeviceEntry) => (
+              <div
+                key={device.identityPubkey}
+                className="card bg-base-100 shadow-sm border border-base-300"
+              >
+                <div className="card-body p-4">
+                  <span className="font-mono text-sm truncate">
+                    {device.identityPubkey}
+                  </span>
+                  {device.createdAt && (
+                    <div className="text-xs text-base-content/50">
+                      Added {formatDeviceFoundDate(device.createdAt)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* No devices found message */}
+        {!loadingRemoteList && !hasExistingDevices && (
+          <div className="text-center text-base-content/50 text-sm">
+            No existing devices found. Click &quot;Start secure messaging&quot; to begin.
+          </div>
+        )}
       </div>
     )
   }

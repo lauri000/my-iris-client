@@ -1,3 +1,4 @@
+import {useState, useEffect} from "react"
 import NotificationPrompt from "@/shared/components/NotificationPrompt"
 import {RiUserLine, RiTeamLine, RiEarthLine, RiComputerLine} from "@remixicon/react"
 import InstallPWAPrompt from "@/shared/components/InstallPWAPrompt"
@@ -8,6 +9,7 @@ import GroupChatCreation from "./group/GroupChatCreation"
 import Header from "@/shared/components/header/Header"
 import PublicChannelCreateStep from "./public/PublicChannelCreateStep"
 import DevicesTab from "./devices/DevicesTab"
+import {isDeviceRegistered} from "@/shared/services/DeviceRegistrationService"
 
 const TabSelector = () => {
   const location = useLocation()
@@ -47,6 +49,44 @@ const TabSelector = () => {
 
 const NewChat = () => {
   const location = useLocation()
+  const [deviceRegistered, setDeviceRegistered] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    isDeviceRegistered().then(setDeviceRegistered)
+  }, [])
+
+  // If device not registered, always show DevicesTab (no tabs visible)
+  if (deviceRegistered === false) {
+    return (
+      <>
+        <Header>
+          <span className="truncate">Get Started</span>
+        </Header>
+        <div className="pt-[calc(4rem+env(safe-area-inset-top))] pb-[calc(4rem+env(safe-area-inset-bottom))] md:pt-0 md:pb-0">
+          <NotificationPrompt />
+          {/* No TabSelector - just show DevicesTab */}
+          <DevicesTab onRegistered={() => setDeviceRegistered(true)} />
+          <InstallPWAPrompt />
+        </div>
+      </>
+    )
+  }
+
+  // Loading state - show minimal loading
+  if (deviceRegistered === null) {
+    return (
+      <>
+        <Header>
+          <span className="truncate">Private Messaging</span>
+        </Header>
+        <div className="pt-[calc(4rem+env(safe-area-inset-top))]">
+          <div className="flex justify-center py-8">
+            <span className="loading loading-spinner" />
+          </div>
+        </div>
+      </>
+    )
+  }
 
   // Determine which component to show based on the path
   let content = null
