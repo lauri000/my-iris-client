@@ -6,6 +6,7 @@ import {getDelegateManager} from "@/shared/services/DelegateManagerService"
 import {
   isDeviceRegistered,
   registerCurrentDevice,
+  addDeviceToExistingList,
 } from "@/shared/services/DeviceRegistrationService"
 import {createNostrSubscribe} from "@/shared/services/nostrHelpers"
 import {ndk} from "@/utils/ndk"
@@ -34,6 +35,8 @@ const DevicesTab = () => {
     boolean | null
   >(null)
   const [isRegistering, setIsRegistering] = useState(false)
+  const [remoteInviteList, setRemoteInviteList] = useState<InviteList | null>(null)
+  const [loadingRemoteList, setLoadingRemoteList] = useState(true)
 
   const formatDeviceFoundDate = (timestamp?: number) => {
     if (!timestamp) return null
@@ -81,7 +84,32 @@ const DevicesTab = () => {
     isDeviceRegistered().then(setIsCurrentDeviceRegistered)
   }, [publicKey])
 
-  const handleRegisterCurrentDevice = async () => {
+  // Fetch remote InviteList when device is not registered
+  useEffect(() => {
+    if (!publicKey || isCurrentDeviceRegistered !== false) {
+      setLoadingRemoteList(false)
+      return
+    }
+
+    setLoadingRemoteList(true)
+    const ndkInstance = ndk()
+    const subscribe = createNostrSubscribe(ndkInstance)
+
+    const unsubscribe = InviteList.fromUser(publicKey, subscribe, (list) => {
+      setRemoteInviteList(list)
+      setLoadingRemoteList(false)
+    })
+
+    // Timeout fallback if no list found
+    const timeout = setTimeout(() => setLoadingRemoteList(false), 3000)
+
+    return () => {
+      unsubscribe()
+      clearTimeout(timeout)
+    }
+  }, [publicKey, isCurrentDeviceRegistered])
+
+  const handleStartPrivateMessaging = async () => {
     setIsRegistering(true)
     try {
       await registerCurrentDevice()
@@ -91,6 +119,22 @@ const DevicesTab = () => {
     } catch (err) {
       console.error("Failed to register device:", err)
       await alert("Failed to register device")
+    } finally {
+      setIsRegistering(false)
+    }
+  }
+
+  const handleAddThisDevice = async () => {
+    if (!remoteInviteList) return
+    setIsRegistering(true)
+    try {
+      await addDeviceToExistingList(remoteInviteList)
+      setIsCurrentDeviceRegistered(true)
+      // Initialize the session listener now that device is registered
+      await attachSessionEventListener()
+    } catch (err) {
+      console.error("Failed to add device:", err)
+      await alert("Failed to add device")
     } finally {
       setIsRegistering(false)
     }
@@ -276,6 +320,9 @@ const DevicesTab = () => {
 
   // Show registration prompt if device is not registered
   if (isCurrentDeviceRegistered === false) {
+    const hasExistingDevices =
+      remoteInviteList && remoteInviteList.getAllDevices().length > 0
+
     return (
       <div className="p-4">
         <div className="card bg-base-100 border border-primary/30">
@@ -287,13 +334,12 @@ const DevicesTab = () => {
               <h2 className="card-title">Enable Secure Messaging</h2>
             </div>
             <p className="text-base-content/70">
-              Register this device to send and receive encrypted direct messages. Your
-              device will be added to your authorized devices list.
+              Register this device to send and receive encrypted direct messages.
             </p>
-            <div className="card-actions justify-end mt-4">
+            <div className="card-actions justify-end mt-4 gap-2">
               <button
                 className="btn btn-primary"
-                onClick={handleRegisterCurrentDevice}
+                onClick={handleStartPrivateMessaging}
                 disabled={isRegistering}
               >
                 {isRegistering ? (
@@ -302,10 +348,29 @@ const DevicesTab = () => {
                     Registering...
                   </>
                 ) : (
-                  "Register This Device"
+                  "Start using private messaging"
+                )}
+              </button>
+              <button
+                className="btn btn-outline"
+                onClick={handleAddThisDevice}
+                disabled={isRegistering || loadingRemoteList || !hasExistingDevices}
+              >
+                {loadingRemoteList ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Checking...
+                  </>
+                ) : (
+                  "Add this device"
                 )}
               </button>
             </div>
+            {!loadingRemoteList && !hasExistingDevices && (
+              <p className="text-xs text-base-content/50 mt-2 text-right">
+                No existing devices found. Start fresh with the button above.
+              </p>
+            )}
           </div>
         </div>
       </div>
