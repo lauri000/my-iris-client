@@ -1,12 +1,17 @@
 import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
-import {RiDeleteBin6Line, RiAddLine} from "@remixicon/react"
+import {RiDeleteBin6Line, RiAddLine, RiShieldCheckLine} from "@remixicon/react"
 import {getDeviceManager} from "@/shared/services/DeviceManagerService"
 import {getDelegateManager} from "@/shared/services/DelegateManagerService"
+import {
+  isDeviceRegistered,
+  registerCurrentDevice,
+} from "@/shared/services/DeviceRegistrationService"
 import {createNostrSubscribe} from "@/shared/services/nostrHelpers"
 import {ndk} from "@/utils/ndk"
 import {confirm, alert} from "@/utils/utils"
 import {DelegatePayload, InviteList, DeviceEntry} from "nostr-double-ratchet"
+import {attachSessionEventListener} from "@/utils/dmEventHandler"
 
 interface DeviceInfo {
   id: string
@@ -25,6 +30,10 @@ const DevicesTab = () => {
   const [pairingCodeInput, setPairingCodeInput] = useState("")
   const [addingDevice, setAddingDevice] = useState(false)
   const [pairingError, setPairingError] = useState("")
+  const [isCurrentDeviceRegistered, setIsCurrentDeviceRegistered] = useState<
+    boolean | null
+  >(null)
+  const [isRegistering, setIsRegistering] = useState(false)
 
   const formatDeviceFoundDate = (timestamp?: number) => {
     if (!timestamp) return null
@@ -61,6 +70,30 @@ const DevicesTab = () => {
     })
 
     return [...sortedActive, ...removedList]
+  }
+
+  // Check registration status on mount
+  useEffect(() => {
+    if (!publicKey) {
+      setIsCurrentDeviceRegistered(null)
+      return
+    }
+    isDeviceRegistered().then(setIsCurrentDeviceRegistered)
+  }, [publicKey])
+
+  const handleRegisterCurrentDevice = async () => {
+    setIsRegistering(true)
+    try {
+      await registerCurrentDevice()
+      setIsCurrentDeviceRegistered(true)
+      // Initialize the session listener now that device is registered
+      await attachSessionEventListener()
+    } catch (err) {
+      console.error("Failed to register device:", err)
+      await alert("Failed to register device")
+    } finally {
+      setIsRegistering(false)
+    }
   }
 
   useEffect(() => {
@@ -235,6 +268,44 @@ const DevicesTab = () => {
                 <RiDeleteBin6Line size={16} />
               </button>
             )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show registration prompt if device is not registered
+  if (isCurrentDeviceRegistered === false) {
+    return (
+      <div className="p-4">
+        <div className="card bg-base-100 border border-primary/30">
+          <div className="card-body">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <RiShieldCheckLine size={24} className="text-primary" />
+              </div>
+              <h2 className="card-title">Enable Secure Messaging</h2>
+            </div>
+            <p className="text-base-content/70">
+              Register this device to send and receive encrypted direct messages. Your
+              device will be added to your authorized devices list.
+            </p>
+            <div className="card-actions justify-end mt-4">
+              <button
+                className="btn btn-primary"
+                onClick={handleRegisterCurrentDevice}
+                disabled={isRegistering}
+              >
+                {isRegistering ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Registering...
+                  </>
+                ) : (
+                  "Register This Device"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

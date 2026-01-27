@@ -58,7 +58,7 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
   // 2. Initialize DelegateManager (device identity)
   const delegateManager = await getDelegateManager()
 
-  // 3. Check if this device is already in the InviteList
+  // 3. Check if this device is registered in the InviteList
   const devices = deviceManager.getOwnDevices()
   const delegatePubkey = delegateManager.getIdentityPublicKey()
   const isDeviceInList = devices.some(
@@ -66,10 +66,11 @@ const initializeSessionManager = async (): Promise<SessionManager> => {
   )
 
   if (!isDeviceInList) {
-    // Add this device to InviteList (same as adding any delegate device)
-    deviceManager.addDevice({identityPubkey: delegatePubkey})
-    await deviceManager.publish()
-    log("Added main device to InviteList:", delegatePubkey.slice(0, 8))
+    // Device not registered - throw error instead of auto-registering
+    // User must explicitly register via DevicesTab
+    throw new Error(
+      "Device not registered. Please register this device in Settings > Devices."
+    )
   }
 
   // 4. Activate directly - we know we're the owner, no need to fetch from relay

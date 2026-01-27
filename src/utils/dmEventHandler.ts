@@ -19,10 +19,18 @@ export const cleanupSessionEventListener = () => {
   unsubscribeSessionEvents?.()
 }
 
-export const attachSessionEventListener = () => {
+export const attachSessionEventListener = async () => {
   // Skip for delegate devices - they have their own listener in DelegateDevice.ts
   if (isDelegateDevice()) {
     log("Skipping main session listener for delegate device")
+    return
+  }
+
+  // Check if device is registered before trying to initialize SessionManager
+  const {isDeviceRegistered} = await import("@/shared/services/DeviceRegistrationService")
+  const registered = await isDeviceRegistered()
+  if (!registered) {
+    log("Device not registered, skipping session listener setup")
     return
   }
 
