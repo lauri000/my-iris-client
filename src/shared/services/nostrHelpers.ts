@@ -28,9 +28,11 @@ export const waitForRelayConnection = async (
 
 /**
  * Create a NostrSubscribe function for the library using NDK.
+ * Note: Uses cast to handle nostr-tools version mismatch between client and library.
  */
 export const createNostrSubscribe = (ndkInstance: NDK): NostrSubscribe => {
-  return (filter: NDKFilter, onEvent: (event: VerifiedEvent) => void) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((filter: NDKFilter, onEvent: (event: any) => void) => {
     const subscription = ndkInstance.subscribe(filter)
 
     subscription.on("event", (event: NDKEvent) => {
@@ -42,7 +44,7 @@ export const createNostrSubscribe = (ndkInstance: NDK): NostrSubscribe => {
     return () => {
       subscription.stop()
     }
-  }
+  }) as NostrSubscribe
 }
 
 /**
@@ -69,6 +71,36 @@ export const createSigningPublish = async (
 
   return (async (event) => {
     if (!("sig" in event) || !event.sig) {
+      const signedEvent = finalizeEvent(event, privateKey)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = new NDKEvent(ndkInstance, signedEvent as any)
+      await e.publish()
+      return signedEvent
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const e = new NDKEvent(ndkInstance, event as any)
+    await e.publish()
+    return event
+  }) as NostrPublish
+}
+
+/**
+ * Create a NostrPublish function that uses a deferred signing key.
+ * The key getter is called at publish time, allowing the key to be set after init().
+ * Used when the signing key isn't available until after DelegateManager.init().
+ */
+export const createDeferredSigningPublish = async (
+  ndkInstance: NDK,
+  getPrivateKey: () => Uint8Array | null
+): Promise<NostrPublish> => {
+  const {finalizeEvent} = await import("nostr-tools")
+
+  return (async (event) => {
+    if (!("sig" in event) || !event.sig) {
+      const privateKey = getPrivateKey()
+      if (!privateKey) {
+        throw new Error("Signing key not available")
+      }
       const signedEvent = finalizeEvent(event, privateKey)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const e = new NDKEvent(ndkInstance, signedEvent as any)

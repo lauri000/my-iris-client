@@ -1,4 +1,4 @@
-import {VerifiedEvent, finalizeEvent} from "nostr-tools"
+import {VerifiedEvent} from "nostr-tools"
 import {LocalForageStorageAdapter} from "../../session/StorageAdapter"
 import {
   NostrPublish,
@@ -17,10 +17,11 @@ import {
 } from "@/stores/delegateDevice"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
+import {createNostrSubscribe, createDeferredSigningPublish} from "./nostrHelpers"
 
 const {log} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
-const createSubscribe = (ndkInstance: NDK): NostrSubscribe => {
+const createLocalSubscribe = (ndkInstance: NDK) => {
   return (filter: NDKFilter, onEvent: (event: VerifiedEvent) => void) => {
     const subscription = ndkInstance.subscribe(filter)
 
@@ -45,14 +46,17 @@ const createPublish = (ndkInstance: NDK): NostrPublish => {
 }
 
 let delegateManager: DelegateManager | null = null
+let initPromise: Promise<DelegateManager | null> | null = null
 
 /**
  * Get or create the DelegateManager for delegate device operation.
  * Note: For messaging, use getSessionManager() from SessionManagerService instead.
  * This is kept for initialization and revocation checks.
  */
-export const getDelegateDeviceManager = (): DelegateManager | null => {
+export const getDelegateDeviceManager = async (): Promise<DelegateManager | null> => {
   if (delegateManager) return delegateManager
+
+  if (initPromise) return initPromise
 
   const credentials = useDelegateDeviceStore.getState().credentials
   if (!credentials) {
@@ -60,42 +64,48 @@ export const getDelegateDeviceManager = (): DelegateManager | null => {
     return null
   }
 
-  delegateManager = createDelegateDeviceManager(credentials)
-  return delegateManager
+  initPromise = createDelegateDeviceManager(credentials).then((manager) => {
+    delegateManager = manager
+    return manager
+  })
+  return initPromise
 }
 
 /**
- * Create a DelegateManager from credentials
+ * Create a DelegateManager from credentials.
+ * Pre-populates storage with credentials so init() loads them.
  */
-export const createDelegateDeviceManager = (
+export const createDelegateDeviceManager = async (
   credentials: DelegateDeviceCredentials
-): DelegateManager => {
+): Promise<DelegateManager> => {
   const ndkInstance = ndk()
-  const devicePrivateKey = getDevicePrivateKeyBytes(credentials)
+  const storage = new LocalForageStorageAdapter()
 
-  // Create a publish function that can sign events with the delegate's key
-  const delegatePublish: NostrPublish = (async (event) => {
-    // Sign unsigned events (like Invite)
-    if (!("sig" in event) || !event.sig) {
-      const signedEvent = finalizeEvent(event, devicePrivateKey)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const e = new NDKEvent(ndkInstance, signedEvent as any)
-      await e.publish()
-      return signedEvent
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const e = new NDKEvent(ndkInstance, event as any)
-    await e.publish()
-    return event
-  }) as NostrPublish
+  // Pre-populate storage with credentials so init() loads them
+  await storage.put("v1/device-manager/identity-public-key", credentials.devicePublicKey)
+  await storage.put(
+    "v1/device-manager/identity-private-key",
+    Array.from(
+      (await import("nostr-tools/utils")).hexToBytes(credentials.devicePrivateKey)
+    )
+  )
 
-  return DelegateManager.restore({
-    devicePublicKey: credentials.devicePublicKey,
-    devicePrivateKey,
-    nostrSubscribe: createSubscribe(ndkInstance),
+  // Holder pattern for signing key access during init
+  const managerHolder: {manager: DelegateManager | null} = {manager: null}
+
+  const delegatePublish = await createDeferredSigningPublish(
+    ndkInstance,
+    () => managerHolder.manager?.getIdentityKey() ?? null
+  )
+
+  const manager = new DelegateManager({
+    nostrSubscribe: createNostrSubscribe(ndkInstance),
     nostrPublish: delegatePublish,
-    storage: new LocalForageStorageAdapter(),
+    storage,
   })
+  managerHolder.manager = manager
+
+  return manager
 }
 
 /**
@@ -107,7 +117,7 @@ export const createDelegateDeviceManager = (
  * from dmEventHandler for message handling.
  */
 export const initializeDelegateDevice = async (timeoutMs = 60000): Promise<string> => {
-  const dm = getDelegateDeviceManager()
+  const dm = await getDelegateDeviceManager()
   if (!dm) {
     throw new Error("No delegate device credentials")
   }
@@ -142,7 +152,7 @@ export const initializeDelegateDevice = async (timeoutMs = 60000): Promise<strin
  * Check if the delegate device has been revoked
  */
 export const checkDelegateDeviceRevoked = async (): Promise<boolean> => {
-  const dm = getDelegateDeviceManager()
+  const dm = await getDelegateDeviceManager()
   if (!dm) return false
 
   return dm.isRevoked()
@@ -157,6 +167,7 @@ export const closeDelegateDevice = () => {
     delegateManager.close()
     delegateManager = null
   }
+  initPromise = null
 }
 
 /**
@@ -188,7 +199,10 @@ export const initiateSessionFromDelegate = async (
   }
 
   const ndkInstance = ndk()
-  const nostrSubscribe = createSubscribe(ndkInstance)
+  // Use local subscribe for our own event handling
+  const localSubscribe = createLocalSubscribe(ndkInstance)
+  // Use library-typed subscribe for library functions (cast as unknown to bypass type incompatibility)
+  const librarySubscribe = createNostrSubscribe(ndkInstance) as unknown as NostrSubscribe
   const nostrPublish = createPublish(ndkInstance)
 
   log("Initiating session with:", recipientPublicKey)
@@ -204,7 +218,7 @@ export const initiateSessionFromDelegate = async (
       }
     }, 10000)
 
-    const unsubscribe = nostrSubscribe(
+    const unsubscribe = localSubscribe(
       {
         kinds: [INVITE_LIST_EVENT_KIND],
         authors: [recipientPublicKey],
@@ -214,7 +228,9 @@ export const initiateSessionFromDelegate = async (
       (event: VerifiedEvent) => {
         if (resolved) return
         try {
-          const list = InviteList.fromEvent(event)
+          // Cast event for library function compatibility
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list = InviteList.fromEvent(event as any)
           resolved = true
           clearTimeout(timeout)
           unsubscribe()
@@ -257,7 +273,7 @@ export const initiateSessionFromDelegate = async (
 
         const unsubscribe = Invite.fromUser(
           device.identityPubkey,
-          nostrSubscribe,
+          librarySubscribe,
           (inv: Invite) => {
             // Accept invite matching this device's identity pubkey
             if (inv.deviceId === device.identityPubkey) {
@@ -280,7 +296,7 @@ export const initiateSessionFromDelegate = async (
       // Accept the invite to establish session
       // inviteePublicKey serves as both identity and device ID
       const {event} = await invite.accept(
-        nostrSubscribe,
+        librarySubscribe,
         credentials.devicePublicKey, // Our public key (also serves as device ID)
         getDevicePrivateKeyBytes(credentials), // Our private key for encryption
         credentials.ownerPublicKey! // Our owner's pubkey (for chat routing)

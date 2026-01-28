@@ -5,16 +5,14 @@ import {
   closeDelegateDevice,
 } from "@/shared/services/DelegateDevice"
 import {useDelegateDeviceStore, DelegateDeviceCredentials} from "@/stores/delegateDevice"
-import {
-  DelegateManager,
-  DelegatePayload,
-  NostrPublish,
-  NostrSubscribe,
-} from "nostr-double-ratchet"
+import {DelegateManager, DelegatePayload} from "nostr-double-ratchet"
+import {LocalForageStorageAdapter} from "@/session/StorageAdapter"
 import {bytesToHex} from "@noble/hashes/utils"
 import {ndk} from "@/utils/ndk"
-import {VerifiedEvent} from "nostr-tools"
-import {NDKEvent, NDKFilter} from "@/lib/ndk"
+import {
+  createNostrSubscribe,
+  createDeferredSigningPublish,
+} from "@/shared/services/nostrHelpers"
 
 interface DelegateSetupProps {
   onActivated: () => void
@@ -81,53 +79,32 @@ export default function DelegateSetup({onActivated}: DelegateSetupProps) {
   const generatePairingCode = async (_label: string) => {
     const ndkInstance = ndk()
 
-    // Context for signing - will be set after manager is created
-    let signingKey: Uint8Array | null = null
+    // Use dedicated storage for this delegate device
+    const storage = new LocalForageStorageAdapter()
 
-    const nostrSubscribe: NostrSubscribe = (
-      filter: NDKFilter,
-      onEvent: (e: VerifiedEvent) => void
-    ) => {
-      const subscription = ndkInstance.subscribe(filter)
-      subscription.on("event", (event: NDKEvent) => {
-        onEvent(event as unknown as VerifiedEvent)
-      })
-      subscription.start()
-      return () => subscription.stop()
-    }
+    // Holder pattern for signing key access during init
+    const managerHolder: {manager: DelegateManager | null} = {manager: null}
 
-    const nostrPublish: NostrPublish = (async (event) => {
-      // Sign unsigned events (like Invite) with the device's key
-      if (!("sig" in event) || !event.sig) {
-        if (!signingKey) {
-          throw new Error("Signing key not set")
-        }
-        const {finalizeEvent} = await import("nostr-tools")
-        const signedEvent = finalizeEvent(event, signingKey)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const e = new NDKEvent(ndkInstance, signedEvent as any)
-        await e.publish()
-        return signedEvent
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const e = new NDKEvent(ndkInstance, event as any)
-      await e.publish()
-      return event
-    }) as NostrPublish
+    const nostrSubscribe = createNostrSubscribe(ndkInstance)
+    const nostrPublish = await createDeferredSigningPublish(
+      ndkInstance,
+      () => managerHolder.manager?.getIdentityKey() ?? null
+    )
 
-    // Generate keys locally using DelegateManager.create()
-    // New API - no deviceId/deviceLabel needed
-    const {manager, payload} = DelegateManager.create({
+    // Create manager with new API - keys generated during init()
+    const manager = new DelegateManager({
       nostrSubscribe,
       nostrPublish,
+      storage,
     })
+    managerHolder.manager = manager
 
-    // Set the signing key before init() so Invite can be published
-    const devicePrivateKey = manager.getIdentityKey()
-    signingKey = devicePrivateKey
-
-    // Initialize the manager - this publishes the Invite event
+    // Initialize the manager - this generates keys and publishes the Invite event
     await manager.init()
+
+    // Get the registration payload after init
+    const payload: DelegatePayload = manager.getRegistrationPayload()
+    const devicePrivateKey = manager.getIdentityKey()
 
     // Get ephemeral keys from the Invite
     const invite = manager.getInvite()
@@ -137,7 +114,7 @@ export default function DelegateSetup({onActivated}: DelegateSetupProps) {
 
     // Store credentials locally (including private keys from Invite)
     // Note: deviceId/deviceLabel kept for backwards compatibility with local storage
-    const credentials = {
+    const newCredentials = {
       devicePublicKey: manager.getIdentityPublicKey(),
       devicePrivateKey: bytesToHex(devicePrivateKey),
       ephemeralPublicKey: invite.inviterEphemeralPublicKey,
@@ -146,7 +123,7 @@ export default function DelegateSetup({onActivated}: DelegateSetupProps) {
       deviceId: manager.getIdentityPublicKey(), // Use identityPubkey as deviceId
       deviceLabel: manager.getIdentityPublicKey().slice(0, 8), // Short label from pubkey
     }
-    setCredentials(credentials)
+    setCredentials(newCredentials)
 
     // Create pairing code with identity info only (DelegatePayload)
     // Ephemeral keys are published separately in the Invite event
