@@ -171,7 +171,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     }
 
     let unsubscribe: (() => void) | null = null
-    let hasCurrentDevice = false
+    let deviceManagerRef: Awaited<ReturnType<typeof getDeviceManager>> | null = null
 
     const setup = async () => {
       setLoading(true)
@@ -181,28 +181,23 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         const delegateManager = await getDelegateManager()
         const deviceId = delegateManager.getIdentityPublicKey()
 
-        // Also load from local DeviceManager for immediate display
+        // Load from local DeviceManager for immediate display
         const deviceManager = await getDeviceManager()
+        deviceManagerRef = deviceManager
         const localList = deviceManager.getInviteList()
         if (localList) {
-          const localDevices = buildDeviceList(localList, deviceId)
-          setDevices(localDevices)
-          // Track if local list has current device to avoid overwriting with stale relay data
-          hasCurrentDevice = localDevices.some((d) => d.isCurrent)
+          setDevices(buildDeviceList(localList, deviceId))
         }
 
         // Subscribe to InviteList from relays
         const ndkInstance = ndk()
         const subscribe = createNostrSubscribe(ndkInstance)
 
-        unsubscribe = InviteList.fromUser(publicKey, subscribe, (inviteList) => {
-          const relayDevices = buildDeviceList(inviteList, deviceId)
-          const relayHasCurrentDevice = relayDevices.some((d) => d.isCurrent)
-          // Only update if relay data includes current device, or we don't have it locally
-          if (relayHasCurrentDevice || !hasCurrentDevice) {
-            setDevices(relayDevices)
-            hasCurrentDevice = relayHasCurrentDevice
-          }
+        unsubscribe = InviteList.fromUser(publicKey, subscribe, (remoteList) => {
+          // Merge remote with local - union strategy ensures we don't lose data
+          const localList = deviceManagerRef?.getInviteList()
+          const mergedList = localList ? localList.merge(remoteList) : remoteList
+          setDevices(buildDeviceList(mergedList, deviceId))
           setLoading(false)
         })
 
