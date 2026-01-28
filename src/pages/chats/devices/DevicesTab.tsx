@@ -1,6 +1,11 @@
 import {useState, useEffect} from "react"
 import {useUserStore} from "@/stores/user"
-import {RiDeleteBin6Line, RiAddLine, RiShieldCheckLine} from "@remixicon/react"
+import {
+  RiDeleteBin6Line,
+  RiAddLine,
+  RiShieldCheckLine,
+  RiLogoutBoxRLine,
+} from "@remixicon/react"
 import {getDeviceManager} from "@/shared/services/DeviceManagerService"
 import {getDelegateManager} from "@/shared/services/DelegateManagerService"
 import {
@@ -13,6 +18,11 @@ import {ndk} from "@/utils/ndk"
 import {confirm, alert} from "@/utils/utils"
 import {DelegatePayload, InviteList, DeviceEntry} from "nostr-double-ratchet"
 import {attachSessionEventListener} from "@/utils/dmEventHandler"
+import {isDelegateDevice, resetDelegateDevice} from "@/shared/services/DelegateDevice"
+import {resetSessionManager} from "@/shared/services/SessionManagerService"
+import {usePrivateMessagesStore} from "@/stores/privateMessages"
+import {useDraftStore} from "@/stores/draft"
+import localforage from "localforage"
 
 interface DeviceInfo {
   id: string
@@ -46,6 +56,48 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<"start" | "add" | null>(null)
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  const isDelegate = isDelegateDevice()
+
+  const handleDelegateLogout = async () => {
+    const confirmed = await confirm(
+      "This will remove this device from your account. You can pair it again later.",
+      "Log out?"
+    )
+    if (!confirmed) return
+
+    setIsLoggingOut(true)
+    try {
+      // Clean up stores
+      await usePrivateMessagesStore.getState().clear()
+      useDraftStore.getState().clearAll()
+
+      // Reset session and delegate device
+      resetSessionManager()
+      resetDelegateDevice()
+
+      // Clean up NDK
+      const ndkInstance = ndk()
+      ndkInstance.signer = undefined
+      ndkInstance.pool.relays.forEach((relay) => relay.disconnect())
+      ndkInstance.pool.relays.clear()
+
+      // Clear storage
+      localStorage.clear()
+      await localforage.clear()
+      await localforage.dropInstance({
+        name: "iris-session-manager",
+        storeName: "session-private",
+      })
+
+      // Reload
+      location.reload()
+    } catch (err) {
+      console.error("Logout error:", err)
+      setIsLoggingOut(false)
+    }
+  }
 
   const formatDeviceFoundDate = (timestamp?: number) => {
     if (!timestamp) return null
@@ -546,6 +598,30 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
           {!currentDevice && otherActiveDevices.length === 0 && (
             <div className="text-center py-8 text-base-content/70">No devices found.</div>
           )}
+        </div>
+      )}
+
+      {isDelegate && (
+        <div className="mt-8 pt-6 border-t border-base-300">
+          <div className="text-xs font-semibold text-base-content/50 uppercase mb-3">
+            This Device
+          </div>
+          <p className="text-sm text-base-content/70 mb-4">
+            Log out to remove this device from your account. You can pair it again later
+            from your main device.
+          </p>
+          <button
+            className="btn btn-error btn-outline gap-2"
+            onClick={handleDelegateLogout}
+            disabled={isLoggingOut}
+          >
+            {isLoggingOut ? (
+              <span className="loading loading-spinner loading-sm" />
+            ) : (
+              <RiLogoutBoxRLine size={18} />
+            )}
+            {isLoggingOut ? "Logging out..." : "Log out"}
+          </button>
         </div>
       )}
 
