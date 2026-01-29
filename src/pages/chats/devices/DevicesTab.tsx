@@ -53,7 +53,8 @@ const DevicesTab = ({onRegistered, onPublishStatusChange}: DevicesTabProps = {})
     boolean | null
   >(null)
   const [isRegistering, setIsRegistering] = useState(false)
-  const [remoteApplicationKeys, setRemoteApplicationKeys] = useState<ApplicationKeys | null>(null)
+  const [remoteApplicationKeys, setRemoteApplicationKeys] =
+    useState<ApplicationKeys | null>(null)
   const [loadingRemoteList, setLoadingRemoteList] = useState(true)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<"start" | "add" | null>(null)

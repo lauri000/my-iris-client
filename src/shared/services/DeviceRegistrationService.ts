@@ -3,24 +3,53 @@ import {getDelegateManager} from "./DelegateManagerService"
 import {createDebugLogger} from "@/utils/createDebugLogger"
 import {DEBUG_NAMESPACES} from "@/utils/constants"
 import {ApplicationKeys} from "nostr-double-ratchet"
+import {useUserStore} from "@/stores/user"
+import {ndk} from "@/utils/ndk"
+import {createNostrSubscribe} from "./nostrHelpers"
 
 const {log} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
 /**
  * Check if the current device is registered in the ApplicationKeys.
  * Does NOT trigger auto-registration.
+ * First checks local storage (fast), then falls back to relay query if not found.
  */
 export const isDeviceRegistered = async (): Promise<boolean> => {
   try {
     const deviceManager = await getDeviceManager()
     const delegateManager = await getDelegateManager()
-
-    const devices = deviceManager.getOwnDevices()
     const delegatePubkey = delegateManager.getIdentityPublicKey()
 
-    return devices.some(
+    // First check local storage (fast path)
+    const localDevices = deviceManager.getOwnDevices()
+    const isLocallyRegistered = localDevices.some(
       (d: {identityPubkey: string}) => d.identityPubkey === delegatePubkey
     )
+    if (isLocallyRegistered) return true
+
+    // Not found locally - check relays with timeout
+    const {publicKey} = useUserStore.getState()
+    if (!publicKey) return false
+
+    const ndkInstance = ndk()
+    const subscribe = createNostrSubscribe(ndkInstance)
+
+    const remoteApplicationKeys = await ApplicationKeys.waitFor(
+      publicKey,
+      subscribe,
+      5000
+    )
+    if (!remoteApplicationKeys) return false
+
+    const device = remoteApplicationKeys.getDevice(delegatePubkey)
+    if (device) {
+      // Found on relay - sync to local storage
+      await deviceManager.setApplicationKeys(remoteApplicationKeys)
+      log("Device found on relay, synced to local storage:", delegatePubkey.slice(0, 8))
+      return true
+    }
+
+    return false
   } catch {
     return false
   }
