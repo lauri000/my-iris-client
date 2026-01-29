@@ -41,7 +41,8 @@ interface DevicesTabProps {
 
 const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const {publicKey} = useUserStore()
-  const [devices, setDevices] = useState<DeviceInfo[]>([])
+  const [localDevices, setLocalDevices] = useState<DeviceInfo[]>([])
+  const [remoteDevices, setRemoteDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [showPairingModal, setShowPairingModal] = useState(false)
   const [pairingCodeInput, setPairingCodeInput] = useState("")
@@ -214,16 +215,26 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     return []
   }
 
+  // Compute diff sets for badge indicators
+  const localDeviceIds = new Set(localDevices.map((d) => d.id))
+  const remoteDeviceIds = new Set(remoteDevices.map((d) => d.id))
+  const localOnlyIds = new Set(
+    [...localDeviceIds].filter((id) => !remoteDeviceIds.has(id))
+  )
+  const remoteOnlyIds = new Set(
+    [...remoteDeviceIds].filter((id) => !localDeviceIds.has(id))
+  )
+
   // Re-run when registration status changes to refresh from local DeviceManager
   useEffect(() => {
     if (!publicKey) {
-      setDevices([])
+      setLocalDevices([])
+      setRemoteDevices([])
       setLoading(false)
       return
     }
 
     let unsubscribe: (() => void) | null = null
-    let deviceManagerRef: Awaited<ReturnType<typeof getDeviceManager>> | null = null
 
     const setup = async () => {
       setLoading(true)
@@ -235,10 +246,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
 
         // Load from local DeviceManager for immediate display
         const deviceManager = await getDeviceManager()
-        deviceManagerRef = deviceManager
         const localList = deviceManager.getInviteList()
         if (localList) {
-          setDevices(buildDeviceList(localList, deviceId))
+          setLocalDevices(buildDeviceList(localList, deviceId))
         }
 
         // Subscribe to InviteList from relays
@@ -246,10 +256,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         const subscribe = createNostrSubscribe(ndkInstance)
 
         unsubscribe = InviteList.fromUser(publicKey, subscribe, (remoteList) => {
-          // Merge remote with local - union strategy ensures we don't lose data
-          const localList = deviceManagerRef?.getInviteList()
-          const mergedList = localList ? localList.merge(remoteList) : remoteList
-          setDevices(buildDeviceList(mergedList, deviceId))
+          setRemoteInviteList(remoteList)
+          setRemoteDevices(buildDeviceList(remoteList, deviceId))
           setLoading(false)
         })
 
@@ -257,7 +265,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         setTimeout(() => setLoading(false), 2000)
       } catch (error) {
         console.error("Failed to load devices:", error)
-        setDevices([])
+        setLocalDevices([])
+        setRemoteDevices([])
         setLoading(false)
       }
     }
@@ -271,24 +280,79 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     }
   }, [publicKey, isCurrentDeviceRegistered])
 
-  const currentDevice = devices.find((device) => device.isCurrent)
-  const otherActiveDevices = devices.filter((device) => !device.isCurrent)
-
   const handleDeleteDevice = async (identityPubkey: string) => {
     if (!(await confirm(`Revoke device ${identityPubkey.slice(0, 8)}?`))) {
       return
     }
 
     try {
-      setLoading(true)
       const deviceManager = await getDeviceManager()
       deviceManager.revokeDevice(identityPubkey)
-      await deviceManager.publish()
-      // List will update via subscription
-      setLoading(false)
+      // Update local state
+      const updatedLocal = deviceManager.getInviteList()
+      if (updatedLocal) {
+        const delegateManager = await getDelegateManager()
+        const deviceId = delegateManager.getIdentityPublicKey()
+        setLocalDevices(buildDeviceList(updatedLocal, deviceId))
+      }
     } catch (error) {
       console.error("Failed to revoke device:", error)
       await alert("Failed to revoke device")
+    }
+  }
+
+  const handlePushLocalList = async () => {
+    try {
+      setLoading(true)
+      const deviceManager = await getDeviceManager()
+      await deviceManager.publish()
+    } catch (error) {
+      console.error("Failed to publish device list:", error)
+      await alert("Failed to publish device list")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUseRemoteList = async () => {
+    if (!remoteInviteList) return
+    try {
+      setLoading(true)
+      const deviceManager = await getDeviceManager()
+      // Replace local with remote (setInviteList saves to storage)
+      await deviceManager.setInviteList(remoteInviteList)
+      // Update local display
+      const delegateManager = await getDelegateManager()
+      const deviceId = delegateManager.getIdentityPublicKey()
+      setLocalDevices(buildDeviceList(remoteInviteList, deviceId))
+    } catch (error) {
+      console.error("Failed to adopt remote list:", error)
+      await alert("Failed to adopt published list")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleMergeToLocal = async () => {
+    if (!remoteInviteList) return
+    try {
+      setLoading(true)
+      const deviceManager = await getDeviceManager()
+      const localList = deviceManager.getInviteList()
+      if (!localList) return
+
+      // Merge local with remote (union of both lists)
+      const mergedList = localList.merge(remoteInviteList)
+      await deviceManager.setInviteList(mergedList)
+
+      // Update local display
+      const delegateManager = await getDelegateManager()
+      const deviceId = delegateManager.getIdentityPublicKey()
+      setLocalDevices(buildDeviceList(mergedList, deviceId))
+    } catch (error) {
+      console.error("Failed to merge lists:", error)
+      await alert("Failed to merge lists")
+    } finally {
       setLoading(false)
     }
   }
@@ -320,8 +384,13 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
 
       const deviceManager = await getDeviceManager()
       deviceManager.addDevice(payload)
-      await deviceManager.publish()
-      // List will update via subscription
+      // Update local state
+      const updatedLocal = deviceManager.getInviteList()
+      if (updatedLocal) {
+        const delegateManager = await getDelegateManager()
+        const deviceId = delegateManager.getIdentityPublicKey()
+        setLocalDevices(buildDeviceList(updatedLocal, deviceId))
+      }
       handleClosePairingModal()
     } catch (error) {
       console.error("Failed to add delegate device:", error)
@@ -347,7 +416,11 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     )
   }
 
-  const renderDeviceCard = (device: DeviceInfo) => {
+  const renderDeviceCard = (
+    device: DeviceInfo,
+    badge?: "unpublished" | "not local",
+    showRevoke?: boolean
+  ) => {
     const deviceFoundDate = formatDeviceFoundDate(device.createdAt)
 
     return (
@@ -356,9 +429,17 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className="font-mono text-sm truncate">{device.id}</span>
+                <span className="font-mono text-sm truncate">
+                  {formatDeviceId(device.id)}
+                </span>
                 {device.isCurrent && (
                   <span className="badge badge-primary badge-sm">Current</span>
+                )}
+                {badge === "unpublished" && (
+                  <span className="badge badge-warning badge-sm">unpublished</span>
+                )}
+                {badge === "not local" && (
+                  <span className="badge badge-info badge-sm">not local</span>
                 )}
               </div>
               {deviceFoundDate && (
@@ -367,7 +448,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                 </div>
               )}
             </div>
-            {!device.isCurrent && (
+            {showRevoke && !device.isCurrent && (
               <button
                 onClick={() => handleDeleteDevice(device.id)}
                 className="btn btn-ghost btn-sm text-error hover:bg-error/20"
@@ -377,6 +458,43 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
               </button>
             )}
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderDeviceSection = (
+    devices: DeviceInfo[],
+    title: string,
+    diffSet: Set<string>,
+    badge: "unpublished" | "not local",
+    showRevoke: boolean
+  ) => {
+    if (devices.length === 0) {
+      return (
+        <div>
+          <div className="text-xs font-semibold text-base-content/50 uppercase mb-2">
+            {title}
+          </div>
+          <div className="text-sm text-base-content/50 p-4 bg-base-200 rounded-lg">
+            No devices
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div>
+        <div className="text-xs font-semibold text-base-content/50 uppercase mb-2">
+          {title}
+        </div>
+        <div className="space-y-2">
+          {devices.map((device) =>
+            renderDeviceCard(
+              device,
+              diffSet.has(device.id) ? badge : undefined,
+              showRevoke
+            )
+          )}
         </div>
       </div>
     )
@@ -574,30 +692,49 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
       {loading ? (
         <div className="text-center py-8 text-base-content/70">Loading devices...</div>
       ) : (
-        <div className="space-y-3">
-          {currentDevice && (
-            <div>
-              <div className="text-xs font-semibold text-base-content/50 uppercase mb-2">
-                This Device
-              </div>
-              {renderDeviceCard(currentDevice)}
-            </div>
+        <div className="space-y-6">
+          {/* Local (Trusted) section */}
+          {renderDeviceSection(
+            localDevices,
+            "Local (Trusted)",
+            localOnlyIds,
+            "unpublished",
+            true
           )}
 
-          {otherActiveDevices.length > 0 && (
-            <div>
-              <div className="text-xs font-semibold text-base-content/50 uppercase mb-2">
-                Other Devices
-              </div>
-              <div className="space-y-2">
-                {otherActiveDevices.map((device) => renderDeviceCard(device))}
-              </div>
-            </div>
+          {/* Published (Relays) section */}
+          {renderDeviceSection(
+            remoteDevices,
+            "Published (Relays)",
+            remoteOnlyIds,
+            "not local",
+            false
           )}
 
-          {!currentDevice && otherActiveDevices.length === 0 && (
-            <div className="text-center py-8 text-base-content/70">No devices found.</div>
-          )}
+          {/* Sync controls */}
+          <div className="flex gap-2 flex-wrap pt-2">
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={handlePushLocalList}
+              disabled={loading}
+            >
+              Publish Local
+            </button>
+            <button
+              className="btn btn-sm btn-outline"
+              onClick={handleUseRemoteList}
+              disabled={loading || !remoteInviteList}
+            >
+              Use Published
+            </button>
+            <button
+              className="btn btn-sm btn-outline"
+              onClick={handleMergeToLocal}
+              disabled={loading || !remoteInviteList}
+            >
+              Merge
+            </button>
+          </div>
         </div>
       )}
 
