@@ -276,7 +276,6 @@ function extractSessionPubkeysFromUserRecords(
     .filter(([publicKey]) => !ourPublicKey || publicKey !== ourPublicKey)
     .flatMap(([, {devices}]) =>
       Array.from(devices.values())
-        .filter(({staleAt}) => staleAt === undefined)
         .flatMap(({activeSession, inactiveSessions = []}) => [
           activeSession,
           ...inactiveSessions,

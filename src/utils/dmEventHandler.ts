@@ -48,12 +48,21 @@ export const attachSessionEventListener = async () => {
 
       unsubscribeSessionEvents = sessionManager.onEvent(
         (event: Rumor, pubKey: string) => {
+          log("[dmEventHandler] received", {
+            from: pubKey?.slice(0, 8),
+            kind: event.kind,
+            id: event.id?.slice(0, 8),
+          })
+
           const {publicKey} = useUserStore.getState()
           if (!publicKey) return
 
           // Block events from muted users
           const mutedUsers = getSocialGraph().getMutedByUser(publicKey)
-          if (mutedUsers.has(pubKey)) return
+          if (mutedUsers.has(pubKey)) {
+            log("[dmEventHandler] blocked: muted user", pubKey?.slice(0, 8))
+            return
+          }
 
           // Trigger desktop notification for DMs if on desktop
           if (isTauri() && event.pubkey !== publicKey) {
