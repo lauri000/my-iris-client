@@ -11,34 +11,57 @@ import PublicChannelCreateStep from "./public/PublicChannelCreateStep"
 import DevicesTab from "./devices/DevicesTab"
 import {isDeviceRegistered} from "@/shared/services/DeviceRegistrationService"
 
-const TabSelector = () => {
+const TabSelector = ({disabled}: {disabled?: boolean}) => {
   const location = useLocation()
   const isPublic = location.pathname.startsWith("/chats/new/public")
   const isGroup = location.pathname.startsWith("/chats/new/group")
   const isDevices = location.pathname.startsWith("/chats/new/devices")
 
-  const getClasses = (isActive: boolean) => {
-    const baseClasses =
-      "border-highlight cursor-pointer flex items-center justify-center flex-1 p-3"
+  const getClasses = (isActive: boolean, isDisabled?: boolean) => {
+    const baseClasses = "flex items-center justify-center flex-1 p-3"
+    if (isDisabled) {
+      return `${baseClasses} text-base-content/30 cursor-not-allowed border-b border-1 border-transparent`
+    }
     return isActive
-      ? `${baseClasses} border-b border-1`
-      : `${baseClasses} text-base-content/70 hover:text-base-content border-b border-1 border-transparent`
+      ? `${baseClasses} border-highlight cursor-pointer border-b border-1`
+      : `${baseClasses} border-highlight cursor-pointer text-base-content/70 hover:text-base-content border-b border-1 border-transparent`
   }
 
   return (
     <div className="flex mb-px md:mb-1">
-      <Link to="/chats/new" className={getClasses(!isPublic && !isGroup && !isDevices)}>
-        <RiUserLine className="mr-2 w-4 h-4" />
-        Direct
-      </Link>
-      <Link to="/chats/new/group" className={getClasses(isGroup)}>
-        <RiTeamLine className="mr-2 w-4 h-4" />
-        Group
-      </Link>
-      <Link to="/chats/new/public" className={getClasses(isPublic)}>
-        <RiEarthLine className="mr-2 w-4 h-4" />
-        Public
-      </Link>
+      {disabled ? (
+        <span className={getClasses(false, true)}>
+          <RiUserLine className="mr-2 w-4 h-4" />
+          Direct
+        </span>
+      ) : (
+        <Link to="/chats/new" className={getClasses(!isPublic && !isGroup && !isDevices)}>
+          <RiUserLine className="mr-2 w-4 h-4" />
+          Direct
+        </Link>
+      )}
+      {disabled ? (
+        <span className={getClasses(false, true)}>
+          <RiTeamLine className="mr-2 w-4 h-4" />
+          Group
+        </span>
+      ) : (
+        <Link to="/chats/new/group" className={getClasses(isGroup)}>
+          <RiTeamLine className="mr-2 w-4 h-4" />
+          Group
+        </Link>
+      )}
+      {disabled ? (
+        <span className={getClasses(false, true)}>
+          <RiEarthLine className="mr-2 w-4 h-4" />
+          Public
+        </span>
+      ) : (
+        <Link to="/chats/new/public" className={getClasses(isPublic)}>
+          <RiEarthLine className="mr-2 w-4 h-4" />
+          Public
+        </Link>
+      )}
       <Link to="/chats/new/devices" className={getClasses(isDevices)}>
         <RiComputerLine className="mr-2 w-4 h-4" />
         Devices
@@ -51,10 +74,21 @@ const NewChat = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [deviceRegistered, setDeviceRegistered] = useState<boolean | null>(null)
+  const [isDevicePublished, setIsDevicePublished] = useState<boolean | null>(null)
 
   useEffect(() => {
     isDeviceRegistered().then(setDeviceRegistered)
   }, [])
+
+  // Force navigate to devices tab when device is not published
+  useEffect(() => {
+    if (
+      isDevicePublished === false &&
+      !location.pathname.startsWith("/chats/new/devices")
+    ) {
+      navigate("/chats/new/devices")
+    }
+  }, [isDevicePublished, location.pathname, navigate])
 
   // If device not registered, always show DevicesTab (no tabs visible)
   if (deviceRegistered === false) {
@@ -103,7 +137,7 @@ const NewChat = () => {
   } else if (location.pathname.startsWith("/chats/new/group")) {
     content = <GroupChatCreation />
   } else if (location.pathname.startsWith("/chats/new/devices")) {
-    content = <DevicesTab />
+    content = <DevicesTab onPublishStatusChange={setIsDevicePublished} />
   } else {
     // Default to private chat creation for /chats/new
     content = <PrivateChatCreation />
@@ -116,7 +150,7 @@ const NewChat = () => {
       </Header>
       <div className="pt-[calc(4rem+env(safe-area-inset-top))] pb-[calc(4rem+env(safe-area-inset-bottom))] md:pt-0 md:pb-0">
         <NotificationPrompt />
-        <TabSelector />
+        <TabSelector disabled={isDevicePublished === false} />
         {content}
         <InstallPWAPrompt />
       </div>

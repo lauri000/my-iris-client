@@ -74,7 +74,7 @@ const initializeForDelegateDevice = async (): Promise<SessionManager> => {
 
 /**
  * Initialize SessionManager for a main device (nsec login).
- * Checks InviteList registration and activates directly.
+ * Checks ApplicationKeys registration and activates directly.
  */
 const initializeForMainDevice = async (): Promise<SessionManager> => {
   const {publicKey} = useUserStore.getState()
@@ -84,13 +84,13 @@ const initializeForMainDevice = async (): Promise<SessionManager> => {
   }
 
   // Initialize DeviceManager and DelegateManager in parallel
-  // DeviceManager = InviteList authority, DelegateManager = device identity
+  // DeviceManager = ApplicationKeys authority, DelegateManager = device identity
   const [deviceManager, delegateManager] = await Promise.all([
     getDeviceManager(),
     getDelegateManager(),
   ])
 
-  // Check if this device is registered in the InviteList
+  // Check if this device is registered in the ApplicationKeys
   const devices = deviceManager.getOwnDevices()
   const delegatePubkey = delegateManager.getIdentityPublicKey()
   const isDeviceInList = devices.some(

@@ -1,4 +1,4 @@
-import {useState, useEffect} from "react"
+import {useState, useEffect, useMemo} from "react"
 import {useUserStore} from "@/stores/user"
 import {
   RiDeleteBin6Line,
@@ -16,7 +16,7 @@ import {
 import {createNostrSubscribe} from "@/shared/services/nostrHelpers"
 import {ndk} from "@/utils/ndk"
 import {confirm, alert} from "@/utils/utils"
-import {DelegatePayload, InviteList, DeviceEntry} from "nostr-double-ratchet"
+import {DelegatePayload, ApplicationKeys, DeviceEntry} from "nostr-double-ratchet"
 import {attachSessionEventListener} from "@/utils/dmEventHandler"
 import {isDelegateDevice, resetDelegateDevice} from "@/shared/services/DelegateDevice"
 import {resetSessionManager} from "@/shared/services/SessionManagerService"
@@ -28,6 +28,7 @@ interface DeviceInfo {
   id: string
   isCurrent: boolean
   createdAt: number
+  isNotPublished?: boolean
 }
 
 const formatDeviceId = (id: string): string => {
@@ -37,9 +38,10 @@ const formatDeviceId = (id: string): string => {
 
 interface DevicesTabProps {
   onRegistered?: () => void
+  onPublishStatusChange?: (isPublished: boolean) => void
 }
 
-const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
+const DevicesTab = ({onRegistered, onPublishStatusChange}: DevicesTabProps = {}) => {
   const {publicKey} = useUserStore()
   const [remoteDevices, setRemoteDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,7 +53,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     boolean | null
   >(null)
   const [isRegistering, setIsRegistering] = useState(false)
-  const [remoteInviteList, setRemoteInviteList] = useState<InviteList | null>(null)
+  const [remoteApplicationKeys, setRemoteApplicationKeys] = useState<ApplicationKeys | null>(null)
   const [loadingRemoteList, setLoadingRemoteList] = useState(true)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<"start" | "add" | null>(null)
@@ -59,6 +61,32 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   const isDelegate = isDelegateDevice()
+
+  // Check if current device is published on relays
+  const isCurrentDevicePublished = useMemo(() => {
+    if (!currentDeviceId) return null
+    return remoteDevices.some((d) => d.id === currentDeviceId)
+  }, [remoteDevices, currentDeviceId])
+
+  // Always include current device in display list
+  const displayDevices = useMemo(() => {
+    const isCurrentInRemote = remoteDevices.some((d) => d.id === currentDeviceId)
+    if (isCurrentInRemote || !currentDeviceId) {
+      return remoteDevices
+    }
+    // Add current device at the top with isNotPublished flag
+    return [
+      {id: currentDeviceId, isCurrent: true, createdAt: Date.now(), isNotPublished: true},
+      ...remoteDevices,
+    ]
+  }, [remoteDevices, currentDeviceId])
+
+  // Notify parent when publish status changes
+  useEffect(() => {
+    if (isCurrentDevicePublished !== null) {
+      onPublishStatusChange?.(isCurrentDevicePublished)
+    }
+  }, [isCurrentDevicePublished, onPublishStatusChange])
 
   const handleDelegateLogout = async () => {
     const confirmed = await confirm(
@@ -106,10 +134,10 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   }
 
   const buildDeviceList = (
-    inviteList: InviteList,
+    applicationKeys: ApplicationKeys,
     currentId: string | null
   ): DeviceInfo[] => {
-    const activeDevices = inviteList.getAllDevices()
+    const activeDevices = applicationKeys.getAllDevices()
 
     const activeList: DeviceInfo[] = activeDevices.map((device: DeviceEntry) => ({
       id: device.identityPubkey,
@@ -150,8 +178,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     const ndkInstance = ndk()
     const subscribe = createNostrSubscribe(ndkInstance)
 
-    const unsubscribe = InviteList.fromUser(publicKey, subscribe, (list) => {
-      setRemoteInviteList(list)
+    const unsubscribe = ApplicationKeys.fromUser(publicKey, subscribe, (list) => {
+      setRemoteApplicationKeys(list)
       setLoadingRemoteList(false)
     })
 
@@ -170,7 +198,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
   }
 
   const handleAddThisDevice = () => {
-    if (!remoteInviteList) return
+    if (!remoteApplicationKeys) return
     setPendingAction("add")
     setShowConfirmModal(true)
   }
@@ -181,8 +209,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     try {
       if (pendingAction === "start") {
         await registerCurrentDevice()
-      } else if (pendingAction === "add" && remoteInviteList) {
-        await addDeviceToExistingList(remoteInviteList)
+      } else if (pendingAction === "add" && remoteApplicationKeys) {
+        await addDeviceToExistingList(remoteApplicationKeys)
       }
       setIsCurrentDeviceRegistered(true)
       onRegistered?.()
@@ -201,9 +229,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     if (pendingAction === "start") {
       // For start: just this device
       return currentDeviceId ? [currentDeviceId] : []
-    } else if (pendingAction === "add" && remoteInviteList) {
+    } else if (pendingAction === "add" && remoteApplicationKeys) {
       // For add: existing devices + this device
-      const existingIds = remoteInviteList
+      const existingIds = remoteApplicationKeys
         .getAllDevices()
         .map((d: DeviceEntry) => d.identityPubkey)
       if (currentDeviceId && !existingIds.includes(currentDeviceId)) {
@@ -236,8 +264,8 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         const ndkInstance = ndk()
         const subscribe = createNostrSubscribe(ndkInstance)
 
-        unsubscribe = InviteList.fromUser(publicKey, subscribe, (remoteList) => {
-          setRemoteInviteList(remoteList)
+        unsubscribe = ApplicationKeys.fromUser(publicKey, subscribe, (remoteList) => {
+          setRemoteApplicationKeys(remoteList)
           setRemoteDevices(buildDeviceList(remoteList, deviceId))
           setLoading(false)
         })
@@ -343,6 +371,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                 {device.isCurrent && (
                   <span className="badge badge-primary badge-sm">Current</span>
                 )}
+                {device.isNotPublished && (
+                  <span className="badge badge-warning badge-sm">Not published</span>
+                )}
               </div>
               {deviceFoundDate && (
                 <div className="text-xs text-base-content/50">
@@ -367,7 +398,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
 
   // Check if there are existing devices on relays
   const hasExistingDevices =
-    remoteInviteList && remoteInviteList.getAllDevices().length > 0
+    remoteApplicationKeys && remoteApplicationKeys.getAllDevices().length > 0
 
   // Show registration prompt only if device is not registered AND no existing devices
   if (isCurrentDeviceRegistered === false && !hasExistingDevices && !loadingRemoteList) {
@@ -518,12 +549,12 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         <div className="text-center py-8 text-base-content/70">Loading devices...</div>
       ) : (
         <div className="space-y-2">
-          {remoteDevices.length === 0 ? (
+          {displayDevices.length === 0 ? (
             <div className="text-sm text-base-content/50 p-4 bg-base-200 rounded-lg">
               No devices published
             </div>
           ) : (
-            remoteDevices.map((device) => renderDeviceCard(device))
+            displayDevices.map((device) => renderDeviceCard(device))
           )}
         </div>
       )}

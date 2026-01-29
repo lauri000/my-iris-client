@@ -1,4 +1,4 @@
-import {DeviceManager} from "nostr-double-ratchet"
+import {ApplicationManager} from "nostr-double-ratchet"
 import {LocalForageStorageAdapter} from "@/session/StorageAdapter"
 import {useUserStore} from "@/stores/user"
 import {ndk} from "@/utils/ndk"
@@ -8,14 +8,14 @@ import {DEBUG_NAMESPACES} from "@/utils/constants"
 
 const {log} = createDebugLogger(DEBUG_NAMESPACES.UTILS)
 
-let deviceManagerInstance: DeviceManager | null = null
-let initPromise: Promise<DeviceManager> | null = null
+let deviceManagerInstance: ApplicationManager | null = null
+let initPromise: Promise<ApplicationManager> | null = null
 
 /**
  * Get the DeviceManager instance, initializing if needed.
- * DeviceManager is the authority for InviteList (which devices are authorized).
+ * DeviceManager is the authority for ApplicationKeys (which devices are authorized).
  */
-export const getDeviceManager = async (): Promise<DeviceManager> => {
+export const getDeviceManager = async (): Promise<ApplicationManager> => {
   if (deviceManagerInstance) return deviceManagerInstance
 
   if (initPromise) return initPromise
@@ -28,14 +28,14 @@ export const getDeviceManager = async (): Promise<DeviceManager> => {
  * Synchronous getter - returns the manager if initialized, otherwise throws.
  * Use getDeviceManager() for most use cases.
  */
-export const getDeviceManagerSync = (): DeviceManager => {
+export const getDeviceManagerSync = (): ApplicationManager => {
   if (!deviceManagerInstance) {
     throw new Error("DeviceManager not yet initialized. Use getDeviceManager() instead.")
   }
   return deviceManagerInstance
 }
 
-const initializeDeviceManager = async (): Promise<DeviceManager> => {
+const initializeDeviceManager = async (): Promise<ApplicationManager> => {
   const {publicKey} = useUserStore.getState()
 
   if (!publicKey) {
@@ -45,7 +45,7 @@ const initializeDeviceManager = async (): Promise<DeviceManager> => {
   const ndkInstance = ndk()
   // NDK handles queuing publishes until relays connect, no need to wait
 
-  deviceManagerInstance = new DeviceManager({
+  deviceManagerInstance = new ApplicationManager({
     nostrPublish: createNostrPublish(ndkInstance),
     storage: new LocalForageStorageAdapter(),
   })
@@ -68,7 +68,7 @@ export const resetDeviceManager = (): void => {
 }
 
 /**
- * Revoke the current device from the InviteList.
+ * Revoke the current device from the ApplicationKeys.
  */
 export const revokeCurrentDevice = async (): Promise<void> => {
   const {publicKey} = useUserStore.getState()

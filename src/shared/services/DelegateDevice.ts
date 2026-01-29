@@ -4,9 +4,9 @@ import {
   NostrPublish,
   NostrSubscribe,
   DelegateManager,
-  InviteList,
+  ApplicationKeys,
   Invite,
-  INVITE_LIST_EVENT_KIND,
+  APPLICATION_KEYS_EVENT_KIND,
 } from "nostr-double-ratchet"
 import NDK, {NDKEvent, NDKFilter} from "@/lib/ndk"
 import {ndk} from "@/utils/ndk"
@@ -188,7 +188,7 @@ export const isDelegateDevice = (): boolean => {
 
 /**
  * Initiate a session with a recipient from the delegate device.
- * Uses two-step discovery: InviteList -> Invite events -> accept
+ * Uses two-step discovery: ApplicationKeys -> Invite events -> accept
  */
 export const initiateSessionFromDelegate = async (
   recipientPublicKey: string
@@ -207,8 +207,8 @@ export const initiateSessionFromDelegate = async (
 
   log("Initiating session with:", recipientPublicKey)
 
-  // Step 1: Fetch recipient's InviteList to get device identities
-  const inviteList = await new Promise<InviteList | null>((resolve) => {
+  // Step 1: Fetch recipient's ApplicationKeys to get device identities
+  const applicationKeys = await new Promise<ApplicationKeys | null>((resolve) => {
     let resolved = false
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -220,9 +220,9 @@ export const initiateSessionFromDelegate = async (
 
     const unsubscribe = localSubscribe(
       {
-        kinds: [INVITE_LIST_EVENT_KIND],
+        kinds: [APPLICATION_KEYS_EVENT_KIND],
         authors: [recipientPublicKey],
-        "#d": ["double-ratchet/invite-list"],
+        "#d": ["double-ratchet/application-keys"],
         limit: 1,
       },
       (event: VerifiedEvent) => {
@@ -230,7 +230,7 @@ export const initiateSessionFromDelegate = async (
         try {
           // Cast event for library function compatibility
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const list = InviteList.fromEvent(event as any)
+          const list = ApplicationKeys.fromEvent(event as any)
           resolved = true
           clearTimeout(timeout)
           unsubscribe()
@@ -242,14 +242,14 @@ export const initiateSessionFromDelegate = async (
     )
   })
 
-  if (!inviteList) {
-    log("No InviteList found for recipient:", recipientPublicKey)
+  if (!applicationKeys) {
+    log("No ApplicationKeys found for recipient:", recipientPublicKey)
     return false
   }
 
-  const devices = inviteList.getAllDevices()
+  const devices = applicationKeys.getAllDevices()
   if (devices.length === 0) {
-    log("Recipient has no devices in InviteList")
+    log("Recipient has no devices in ApplicationKeys")
     return false
   }
 
