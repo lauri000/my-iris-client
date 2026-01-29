@@ -365,24 +365,14 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     )
   }
 
-  // Show registration prompt if device is not registered
-  if (isCurrentDeviceRegistered === false) {
-    const hasExistingDevices =
-      remoteInviteList && remoteInviteList.getAllDevices().length > 0
-    const existingDevices = remoteInviteList?.getAllDevices() || []
+  // Check if there are existing devices on relays
+  const hasExistingDevices =
+    remoteInviteList && remoteInviteList.getAllDevices().length > 0
 
+  // Show registration prompt only if device is not registered AND no existing devices
+  if (isCurrentDeviceRegistered === false && !hasExistingDevices && !loadingRemoteList) {
     return (
       <div className="p-4 space-y-4">
-        {/* Search status - always visible while loading */}
-        {loadingRemoteList && (
-          <div className="flex items-center justify-center gap-3 p-4 bg-base-200 rounded-lg">
-            <span className="loading loading-spinner loading-sm" />
-            <span className="text-base-content/70">
-              Searching for existing devices on relays...
-            </span>
-          </div>
-        )}
-
         {/* Main registration card */}
         <div className="card bg-base-100 border border-primary/30">
           <div className="card-body">
@@ -396,8 +386,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
               Register this device to send and receive encrypted direct messages.
             </p>
 
-            <div className="card-actions justify-end mt-4 gap-2">
-              {/* Always show "Start secure messaging" */}
+            <div className="card-actions justify-end mt-4">
               <button
                 className="btn btn-primary"
                 onClick={handleStartPrivateMessaging}
@@ -412,56 +401,9 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                   "Start secure messaging"
                 )}
               </button>
-
-              {/* Only show "Add this device" when existing devices found */}
-              {hasExistingDevices && (
-                <button
-                  className="btn btn-outline"
-                  onClick={handleAddThisDevice}
-                  disabled={isRegistering}
-                >
-                  Add this device
-                </button>
-              )}
             </div>
           </div>
         </div>
-
-        {/* Show existing devices when found */}
-        {hasExistingDevices && (
-          <div className="space-y-3">
-            <div className="text-xs font-semibold text-base-content/50 uppercase">
-              Your existing devices ({existingDevices.length})
-            </div>
-            {existingDevices.map((device: DeviceEntry, index: number) => (
-              <div
-                key={device.identityPubkey}
-                className="flex items-center gap-3 p-3 bg-base-100 rounded-lg border border-base-300"
-              >
-                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-base-200 text-base-content/70 text-sm font-medium">
-                  {index + 1}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <code className="text-sm font-mono">
-                    {formatDeviceId(device.identityPubkey)}
-                  </code>
-                  {device.createdAt && (
-                    <div className="text-xs text-base-content/50 mt-1">
-                      Added {formatDeviceFoundDate(device.createdAt)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* No devices found message */}
-        {!loadingRemoteList && !hasExistingDevices && (
-          <div className="text-center text-base-content/50 text-sm">
-            No existing devices found. Click &quot;Start secure messaging&quot; to begin.
-          </div>
-        )}
 
         {/* Confirmation modal */}
         {showConfirmModal && (
@@ -471,9 +413,7 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                 <h2 className="card-title">Confirm Device Registration</h2>
 
                 <p className="text-base-content/70 text-sm">
-                  {pendingAction === "start"
-                    ? "You're about to register this device for secure messaging."
-                    : "You're about to add this device to your existing device list."}
+                  You&apos;re about to register this device for secure messaging.
                 </p>
 
                 {/* Show devices that will be in the list */}
@@ -507,13 +447,6 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                   </div>
                 </div>
 
-                {/* Warning */}
-                <div className="alert alert-warning">
-                  <span className="text-sm">
-                    Any devices not in this list will no longer receive your messages.
-                  </span>
-                </div>
-
                 <div className="card-actions justify-end mt-4">
                   <button
                     className="btn btn-ghost"
@@ -536,6 +469,20 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
     )
   }
 
+  // Show loading while checking for existing devices
+  if (isCurrentDeviceRegistered === false && loadingRemoteList) {
+    return (
+      <div className="p-4">
+        <div className="flex items-center justify-center gap-3 p-4 bg-base-200 rounded-lg">
+          <span className="loading loading-spinner loading-sm" />
+          <span className="text-base-content/70">
+            Searching for existing devices on relays...
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-4">
       <div className="mb-4">
@@ -544,7 +491,20 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
         </p>
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex gap-2">
+        {isCurrentDeviceRegistered === false && hasExistingDevices && (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleAddThisDevice}
+            disabled={isRegistering}
+          >
+            {isRegistering ? (
+              <span className="loading loading-spinner loading-sm" />
+            ) : (
+              "Add this device"
+            )}
+          </button>
+        )}
         <button
           className="btn btn-primary btn-sm gap-2"
           onClick={() => setShowPairingModal(true)}
@@ -638,6 +598,62 @@ const DevicesTab = ({onRegistered}: DevicesTabProps = {}) => {
                   ) : (
                     "Add Device"
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="card w-full max-w-md bg-base-100 shadow-xl m-4">
+            <div className="card-body">
+              <h2 className="card-title">Add This Device</h2>
+
+              <p className="text-base-content/70 text-sm">
+                You&apos;re about to add this device to your existing device list.
+              </p>
+
+              {/* Show devices that will be in the list */}
+              <div className="my-4">
+                <div className="text-sm font-medium mb-3">Devices after adding:</div>
+                <div className="space-y-2">
+                  {getDevicesToPublish().map((id, index) => (
+                    <div
+                      key={id}
+                      className="flex items-center gap-3 p-3 bg-base-200 rounded-lg"
+                    >
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-base-300 text-base-content/70 text-sm font-medium">
+                        {index + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm font-mono">{formatDeviceId(id)}</code>
+                          {id === currentDeviceId && (
+                            <span className="badge badge-primary badge-sm">
+                              This device
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card-actions justify-end mt-4">
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setShowConfirmModal(false)
+                    setPendingAction(null)
+                  }}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleConfirmPublish}>
+                  Confirm
                 </button>
               </div>
             </div>
